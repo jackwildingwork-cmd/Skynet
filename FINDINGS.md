@@ -217,9 +217,46 @@ Findings:
 
 So the operational reading of CIII — "reproduction sustains the class
 indefinitely against the death of every individual" — holds across a wide
-mortality range and breaks only under extreme senescence. The strict reading
-("sustained R0>1") remains structurally impossible in any bounded world, as in
-Phase 4.
+mortality range. The strict reading ("sustained R0>1") remains structurally
+impossible in any bounded world, as in Phase 4.
+
+### Phase 5b — rigorous rerun (fixed gradient_max, n=32, two configs)
+
+The Phase 5 table above **should not be read across rows**: it mixed
+gradient_max (26 for the top rows, 16 for the lower) and used n=6-8, too few to
+distinguish a real extinction threshold from noise. A clean rerun holds
+gradient_max=20 fixed for all six aging levels, n=32, ticks=900, and repeats the
+sweep on a second, *less-favorable* base config (near-crowding gradient,
+alpha=0.6) as well as the favorable scale-free one (alpha=1.0). It **supersedes**
+the Phase 5 numbers and revises one claim:
+
+- **Founder survival is 0.** Analytic aging-only survival to tick 900,
+  `exp(-(A/B)(e^{BT}-1))`, underflows to exactly 0 for every B>=0.02 (incl.
+  0.12). Empirically, the gen-1 survival fraction is 0.000 in *every* cell —
+  including aging-off, where aging cannot kill them. So the immortal-founder
+  escape hatch was never actually used; competition alone already removes every
+  founder by tick 900. Gompertz makes this guaranteed, not merely observed.
+- **No aging level breaks persistence in a statistically established way.** All
+  B<=0.08 cells are 0/32 in both configs -> 95% rule-of-three upper bound on the
+  true extinction probability <=0.094. B=0.12 shows 2/32 (favorable) and 3/32
+  (near-crowding), but Fisher exact vs the 0/32 cells gives p=0.25 and p=0.12 —
+  **not distinguishable from zero at n=32**. The Phase 5 "breaks at B=0.12"
+  claim (based on a single 1/6 run) is **retracted**: even at B=0.12 the class
+  persists in >=90% of runs. The genuine signal of aging stress is the
+  *declining surviving population* (favorable 34->16, near-crowding 29->11 as
+  B goes off->0.12), not extinction.
+- **Reproduction-carried, and general.** Survivor generation climbs ~11.5 -> ~28
+  with aging in both configs (founders provably gone) — ~28 generations of
+  replacement. The near-crowding config tracks the scale-free one almost
+  exactly, so operational CIII-closure under senescence is **not** specific to
+  the most generous configuration; crowding shows up as smaller surviving
+  populations, not extinction. (Configs that already fail at baseline, e.g. hard
+  crowding alpha=0.5 at low gradient_max in Phase 3, obviously still fail with
+  aging; this generality claim covers configs that persist at baseline.)
+
+Net: the confound removal tightened the core conclusions (escape hatch closed,
+persistence reproduction-carried, holds on a less-favorable config) and forced
+retraction of the one over-read detail (the specific B=0.12 breaking point).
 
 ## Overall
 
