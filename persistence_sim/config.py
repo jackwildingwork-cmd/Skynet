@@ -133,6 +133,24 @@ class Config:
     divergence_death_threshold: float = 0.55
 
     # ------------------------------------------------------------------
+    # Intrinsic mortality (Gompertz law). Nothing lives forever, no matter how
+    # much gradient it consumes: every agent faces a per-tick death hazard that
+    # rises exponentially with age,  h(age) = gompertz_A * exp(gompertz_B*age),
+    # capped at 1.0 (a hard lifespan ceiling). This is senescence — the
+    # accumulation of irreparable structural damage that maintenance (CII) can
+    # only DELAY, not prevent — so it is classified as ∂Σ_M (structural), with
+    # structural_source "senescence"; it introduces NO fourth failure mode
+    # (Lemma 0.1 preserved). Consequence: an individual cannot persist
+    # indefinitely, so class-level persistence now REQUIRES reproduction (CIII)
+    # to replace the aged faster than they die — which is the actual claim.
+    # Disabled by default so prior runs/tests are unchanged; enable for any
+    # honest persistence test.
+    # ------------------------------------------------------------------
+    enable_gompertz: bool = False
+    gompertz_A: float = 0.0001   # baseline hazard per tick at age 0
+    gompertz_B: float = 0.02     # aging rate (median lifespan ~250 ticks at A above)
+
+    # ------------------------------------------------------------------
     # Section 5.4 — Reproduction fidelity (SC4). The successor's memory is
     # produced by a FORCED lossy transform of the parent's, so fidelity is
     # structurally < 1, never merely nominally so. Two channels combine:

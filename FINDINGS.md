@@ -167,6 +167,60 @@ a persistent mild CI tilt. The requirement (variation that changes CI/CII/CIII
 fulfilment and confers real, non-neutral advantage; clades that change over time)
 is met; a knife-edge "this environment → that clade" mapping is not claimed.
 
+## Phase 5 — Intrinsic mortality (Gompertz): nothing lives forever
+
+Every prior "persistence" result had an escape hatch: a well-resourced,
+well-maintained individual could in principle live forever, so persistence could
+be carried by long-lived individuals rather than by the reproductive loop. That
+is not what the framework claims — individuals must die; only the *class* can
+persist. Added a **Gompertz mortality law**: a per-tick death hazard rising
+exponentially with age, `h(a) = A·e^{B·a}`, capped at 1.0 (a hard lifespan
+ceiling no gradient can buy past). It is classified as **∂Σ_M / structural**
+(`structural_source="senescence"`) — senescence is irreparable structural damage
+that maintenance can only delay — so it adds **no fourth failure mode** (Lemma
+0.1 preserved).
+
+Test: the strongest-persisting config (coverage-scaling gradient + self-similar
+reproduction + relaxed costs), across increasing aging rates B:
+
+| aging B | median lifespan | % deaths senescent | extinct | survivor generation |
+|---|---|---|---|---|
+| off | — | 0% | 0/8 | ~12 |
+| 0.02 | ~250t | 16% | 0/8 | ~14 |
+| 0.03 | ~165t | 27% | 0/6 | ~11 |
+| 0.05 | ~100t | 57% | 0/6 | ~15 |
+| 0.08 | ~75t | 77% | 0/6 | ~19 |
+| 0.12 | ~55t | 90% | 1/6 | ~20 |
+
+*(top two rows: gradient_max=26, n=8; lower rows: gradient_max=16, n=6 — the
+absolute populations differ, the trend is the point.)*
+
+Findings:
+
+- **Senescence becomes the dominant death mode** as aging accelerates (up to 90%
+  of all deaths), so no individual persists — the escape hatch is closed.
+- **The class still persists** across the whole range except the most extreme
+  aging (0 extinctions through B=0.08; only B=0.12, median lifespan ~55 ticks,
+  begins to break at 1/6). Reproduction replaces the aged faster than they die.
+- **Survivors are generation ~11–20** with founders guaranteed dead — direct,
+  metric-independent proof that persistence is *reproduction-carried*, not
+  individual-carried. This is the cleanest evidence that CIII operationally
+  closes (replacement sustains the class), and it sidesteps the R0-metric
+  undercount from Phase 4 entirely.
+- It also **corrects an earlier worry**: persistence was never actually resting
+  on immortal founders — even with aging off, survivor generation was already
+  ~12 (agents die young from competition, median lifespan ~87 ticks, and are
+  replaced). Gompertz makes this rigorous rather than incidental: force 90%
+  intrinsic mortality and the class *still* persists through ~20 generations of
+  replacement, failing only when lifespan drops below the time to produce a
+  replacement.
+
+So the operational reading of CIII — "reproduction sustains the class
+indefinitely against the death of every individual" — holds across a wide
+mortality range and breaks only under extreme senescence. The strict reading
+("sustained R0>1") remains structurally impossible in any bounded world, as in
+Phase 4.
+
 ## Overall
 
 - CI/CII structure and the six pairwise signatures: **demonstrated.**
@@ -185,6 +239,13 @@ is met; a knife-edge "this environment → that clade" mapping is not claimed.
   variation finally confers a real advantage because it changes how well a
   successor fulfils the conditions, and only when made non-substitutable by
   wealth (Lemma 0.2 in mechanism form).
+- Intrinsic **Gompertz mortality** (Phase 5): with no individual able to live
+  forever (senescence up to 90% of deaths), the class **still persists** via
+  reproduction across a wide mortality range (survivors at generation ~11–20,
+  founders dead), breaking only under extreme aging. This is the definitive
+  evidence that persistence here is **reproduction-carried** — CIII operationally
+  closes — and it removes the immortal-individual escape hatch that made every
+  earlier persistence result ambiguous.
 
 Every parameter decision and calibration is disclosed in `config.py`. The live
 LLM cognitive substrate (`--backend claude`) remains ready but could not be run:

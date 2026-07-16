@@ -22,6 +22,7 @@ and a parent's own transfer to its child. No bailouts exist to be triggered.
 
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass
 from typing import Dict, List, Optional
@@ -460,18 +461,27 @@ class Engine:
             return
         div = divergence(agent.memory_record, agent.integrity_reference)
         cause: Optional[DeathCause] = None
-        # Lemma 0.1 exhaustion: check resource then structural.
+        senesced = False
+        # Lemma 0.1 exhaustion: check resource, then structural boundary, then
+        # intrinsic senescence (also a structural/∂Σ_M failure — irreparable
+        # aging damage that CII could only delay, not prevent).
         if agent.credit_balance <= 0:
             cause = DeathCause.RESOURCE
         elif div >= self.cfg.divergence_death_threshold:
             cause = DeathCause.STRUCTURAL
+        elif self.cfg.enable_gompertz:
+            age = tick - agent.birth_tick
+            hazard = self.cfg.gompertz_A * math.exp(self.cfg.gompertz_B * age)
+            if hazard >= 1.0 or self.rng.random() < hazard:
+                cause = DeathCause.STRUCTURAL
+                senesced = True
         if cause is None:
             return
         viable = self._count_viable_offspring(agent)
         lineage_terminal = self._is_lineage_terminal(agent)
         structural_source = None
         if cause is DeathCause.STRUCTURAL:
-            structural_source = self._structural_source(agent)
+            structural_source = "senescence" if senesced else self._structural_source(agent)
         record = DeathRecord(
             death_tick=tick, death_cause=cause,
             final_balance=round(agent.credit_balance, 3),

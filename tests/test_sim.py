@@ -186,6 +186,28 @@ def test_traits_run_produces_clade_log_and_births_carry_traits():
         assert abs(sum(a.traits.values()) - 3.0) < 1e-6
 
 
+def test_gompertz_bounds_lifespan_even_when_well_resourced():
+    # With intrinsic mortality on, a lavishly-resourced, sabotage-free, low-entropy
+    # population cannot contain an immortal: every founder eventually dies, and
+    # senescence deaths (∂Σ_M) appear. Nothing lives forever.
+    cfg = small_cfg(seed=2)
+    cfg.enable_gompertz = True
+    cfg.gompertz_A = 0.0005
+    cfg.gompertz_B = 0.03
+    cfg.entropy_rate = 0.0            # remove external structural pressure
+    cfg.starting_balance = 10_000.0   # remove resource pressure
+    cfg.max_ticks = 1000
+    run = Engine(cfg, make_backend(cfg)).run()
+    founders = [a for a in run.agents.values() if a.generation == 1]
+    # no founder is still alive at the end — intrinsic aging removed them all
+    assert all(not a.alive for a in founders)
+    senescence_deaths = [d for d in run.log.of_kind("death")
+                         if d.get("structural_source") == "senescence"]
+    assert senescence_deaths
+    # senescence is classified as structural (∂Σ_M), not a fourth mode
+    assert all(d["cause"] == "structural" for d in senescence_deaths)
+
+
 def test_traits_are_heritable_not_reset_to_parity():
     # a child's traits derive from the (mutated) inherited genome, so with a
     # skewed founder they should not all snap back to 1,1,1

@@ -162,6 +162,12 @@ both togglable in `Config` and off by default:
   `gradient_scaling_exp` (α). α = 1 scale-free, α < 1 crowding, α > 1 synergy;
   `gradient_period`/`gradient_amplitude` make it wax and wane.
 
+- **`enable_gompertz`** — intrinsic Gompertz mortality: a per-tick death hazard
+  rising exponentially with age (`h(a)=A·e^{Ba}`, capped at 1), so nothing lives
+  forever no matter how much gradient it consumes. Classified as ∂Σ_M/structural
+  (`structural_source="senescence"`), no fourth failure mode. Removes the
+  immortal-individual escape hatch, so class persistence must be carried by
+  reproduction (CIII) — which it is, across a wide mortality range (Phase 5).
 - **`enable_traits`** — three heritable, mutable, trade-off-constrained
   *capability* traits (`ci_gain`, `cii_gain`, `ciii_gain`, renormalised to a
   fixed budget) that directly change how well a successor fulfils CI, CII, and
