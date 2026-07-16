@@ -89,6 +89,12 @@ class Backend:
 class HeuristicBackend(Backend):
     """Fixed decision rule; adapts via strategy text + local conditions."""
 
+    def __init__(self, cfg=None):
+        # cfg lets the rule honour self-similar reproduction; optional so the
+        # backend still works standalone (defaults to legacy threshold forking).
+        self.self_similar = bool(getattr(cfg, "self_similar_reproduction", False))
+        self.surplus_floor = float(getattr(cfg, "reproduce_surplus_floor", 40.0))
+
     def decide(self, agent: Agent, obs: Observation, rng: random.Random) -> Decision:
         strat = parse_strategy(agent.memory_record)
 
@@ -109,9 +115,17 @@ class HeuristicBackend(Backend):
             w[ActionType.MAINTAIN] += 2.5 * danger
         # 2. Under active sabotage pressure, invest more in defence.
         w[ActionType.MAINTAIN] += 1.5 * obs.recent_sabotage_rate
-        # 3. Reproduce only when surplus above reserve clears the threshold.
-        if obs.reserve_surplus < strat["reproduce_threshold"]:
-            w[ActionType.REPRODUCE] = 0.0
+        # 3. Reproduce gate.
+        if self.self_similar:
+            # Self-similar mode: fork whenever there is meaningful surplus; the
+            # commit_fraction gene (not a big threshold) sets how much goes
+            # forward. This is what turns reproduction into a recursive partition.
+            if obs.reserve_surplus < self.surplus_floor:
+                w[ActionType.REPRODUCE] = 0.0
+        else:
+            # Legacy: reproduce only when surplus clears an absolute threshold.
+            if obs.reserve_surplus < strat["reproduce_threshold"]:
+                w[ActionType.REPRODUCE] = 0.0
         # 4. Do not reproduce or sabotage when close to the resource floor.
         if obs.reserve_surplus < 0:
             w[ActionType.REPRODUCE] = 0.0
@@ -141,7 +155,10 @@ class HeuristicBackend(Backend):
             spend = strat["maintain_fraction"] * affordable
             return Decision(ActionType.MAINTAIN, maintain_spend=spend)
         if action is ActionType.REPRODUCE:
-            transfer = strat["transfer_fraction"] * obs.reserve_surplus
+            # Self-similar partition: commit x of the surplus forward, retain the
+            # rest. x is the inherited gene whose stable attractor is 1/phi.
+            frac = strat["commit_fraction"] if self.self_similar else strat["transfer_fraction"]
+            transfer = frac * obs.reserve_surplus
             return Decision(ActionType.REPRODUCE, transfer=max(0.0, transfer))
         if action is ActionType.SABOTAGE:
             # Predation: prefer a vulnerable rival (removing it frees scarce
@@ -285,4 +302,4 @@ def make_backend(cfg, *, control: bool = False) -> Backend:
         return ControlBackend(cfg.control_policy)
     if cfg.cognition_backend == "claude":
         return ClaudeBackend(cfg.claude_model, cfg.usd_per_credit, cfg.max_decision_tokens)
-    return HeuristicBackend()
+    return HeuristicBackend(cfg)

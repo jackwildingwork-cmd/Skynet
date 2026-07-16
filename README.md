@@ -148,7 +148,28 @@ persistence. They bias toward death, not survival.
 
 ---
 
-## Findings (mock cognitive substrate, ensemble of 24 seeds)
+## Later phases (self-similar reproduction + coverage-scaling gradient)
+
+The build continued past the v1 closed-commons result. Two structural additions,
+both togglable in `Config` and off by default:
+
+- **`self_similar_reproduction`** + the `commit_fraction` gene + `enable_mutation`
+  — reproduction as a continuous self-similar partition (commit a fraction of
+  surplus forward, retain the rest), the setting where the `x = 1/(1+x)` → 1/φ
+  attractor governs. This took lineage depth from ~2 to ~30 generations.
+- **`dynamic_gradient`** — the resource flux scales with population *coverage*
+  and saturates to a finite maximum (`gradient_max`), a Hill curve with exponent
+  `gradient_scaling_exp` (α). α = 1 scale-free, α < 1 crowding, α > 1 synergy;
+  `gradient_period`/`gradient_amplitude` make it wax and wane.
+
+The full narrative — including that persistence is only achieved under a
+coverage-scaling gradient, that the gradient's exponent decides the outcome, and
+that φ is the recursion attractor and the survival-optimal *pinned* allocation
+but does **not** spontaneously evolve here (individual, not clade, selection) —
+is in **[FINDINGS.md](FINDINGS.md)**. Reproduce Phase 3 with
+`python -m persistence_sim.gradient_experiment`.
+
+## Findings (Phase 1: mock cognitive substrate, ensemble of 24 seeds)
 
 > The mock backend tests the **mechanics and metrics** — whether the
 > three-condition *structure* is exercised — not the LLM strategy-evolution

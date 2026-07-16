@@ -16,9 +16,31 @@ no generational capability drift can occur by construction.
 
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass
 from typing import List
+
+
+def gradient_task_count(cfg, n_alive: int, tick: int) -> int:
+    """Per-tick task flux: a coverage-scaling gradient that SATURATES to a
+    finite maximum (finite surface area).
+
+        n(N, t) = gradient_max * r / (1 + r) * season(t),   r = (N/H)**alpha
+
+    For small N this scales as (N/H)**alpha (capture limited by covered area);
+    for large N it asymptotes to gradient_max (whole planet covered). alpha is
+    the gradient's scaling exponent (see Config). season(t) makes it wax/wane.
+    """
+    n = max(1, n_alive)
+    half = max(1e-9, float(cfg.gradient_half))
+    r = (n / half) ** cfg.gradient_scaling_exp
+    raw = cfg.gradient_max * r / (1.0 + r)
+    season = 1.0
+    if cfg.gradient_period and cfg.gradient_amplitude:
+        season = 1.0 + cfg.gradient_amplitude * math.sin(2.0 * math.pi * tick / cfg.gradient_period)
+        season = max(0.0, season)
+    return max(0, int(round(raw * season)))
 
 
 @dataclass(frozen=True)
@@ -74,9 +96,10 @@ class TaskPool:
         self._serial = 0
         self._current: List[Task] = []
 
-    def refill(self) -> None:
+    def refill(self, n: int | None = None) -> None:
+        count = self._n if n is None else n
         self._current = []
-        for _ in range(self._n):
+        for _ in range(count):
             self._serial += 1
             difficulty = self._rng.randint(self._dmin, self._dmax)
             self._current.append(

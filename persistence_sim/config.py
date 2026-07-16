@@ -146,6 +146,30 @@ class Config:
     compression_ratio: float = 0.65
     corruption_rate: float = 0.04
 
+    # ------------------------------------------------------------------
+    # Heritable variation (evolution). The reproduction fidelity channel only
+    # DEGRADES strategy; without a source of beneficial variation, selection
+    # cannot improve a lineage across generations. When enabled, each fork
+    # mutates the child's strategy parameters, giving selection something to
+    # ratchet on. Disabled by default so baseline runs and tests are unchanged;
+    # the evolution experiment turns it on for the evolving arm only.
+    # ------------------------------------------------------------------
+    enable_mutation: bool = False
+    mutation_rate: float = 0.5      # P(a given strategy parameter mutates per fork)
+    mutation_scale: float = 0.12    # std-dev as a fraction of each parameter's span
+
+    # ------------------------------------------------------------------
+    # Self-similar reproduction. When enabled, an agent no longer waits for a
+    # big fixed surplus threshold and then dumps it; instead, whenever it has
+    # any reproductive surplus above a small floor, it commits a fraction
+    # (`commit_fraction` gene) of that surplus forward to a child and retains
+    # the rest. This makes reproduction a continuous, recursive self-similar
+    # partition — the setting in which the x = 1/(1+x) attractor governs — and
+    # lets a lineage chain across many generations rather than fork once and die.
+    # ------------------------------------------------------------------
+    self_similar_reproduction: bool = False
+    reproduce_surplus_floor: float = 40.0   # min surplus above reserve to fork at all
+
     # Fidelity floor below which a successor is deemed unable to inherit
     # enough structure to independently satisfy CI/CII (CIII(c) f_min).
     # Measured empirically; this is the reporting threshold, not a hard gate.
@@ -166,6 +190,37 @@ class Config:
     task_payout_base: float = 14.0     # payout = base * difficulty
     task_difficulty_min: int = 1
     task_difficulty_max: int = 3
+
+    # ------------------------------------------------------------------
+    # Resource gradient (the "sunlight"). The brief's fixed pool is a CLOSED
+    # finite pie, which conservation pins at criticality — no lineage can be
+    # super-critical, so all go extinct. Real primary gradients (sunlight) scale
+    # with the AREA a population covers: more agents, more captured gradient.
+    # When `dynamic_gradient` is on, the per-tick task flux SATURATES with
+    # coverage toward a finite maximum (finite surface area of the Earth):
+    #     n(N, t) = gradient_max * (N/H)**alpha / (1 + (N/H)**alpha) * season(t)
+    # a Hill curve. For small N it scales as (N/H)**alpha (you only capture the
+    # gradient on the area you cover); for large N it asymptotes to gradient_max
+    # (you have covered the whole planet — no more sunlight to capture). N is the
+    # live population (coverage), H the half-saturation population, and alpha the
+    # gradient's scaling exponent:
+    #   alpha = 1.0  scale-free below saturation.
+    #   alpha < 1.0  crowding: per-capita falls fastest -> punishes large scale.
+    #   alpha > 1.0  synergy: per-capita hump -> an interior optimal scale.
+    # The finite ceiling gives a genuine carrying capacity where resource is
+    # scarce, so allocation and SCALE finally become load-bearing and mutation +
+    # selection can act. season(t) makes the gradient wax and wane (a solar
+    # cycle) so reserves must ride out troughs. Recursion depth stays unknowable
+    # (SC0); indefinite persistence remains the only selector. Whether an
+    # attractor (golden or otherwise) falls out of the evolved scale/allocation
+    # is left to the data — nothing about phi is baked into these dynamics.
+    # ------------------------------------------------------------------
+    dynamic_gradient: bool = False
+    gradient_scaling_exp: float = 1.0      # alpha
+    gradient_max: int = 30                 # finite asymptote: max task slots/tick
+    gradient_half: float = 10.0            # H: population at half the max gradient
+    gradient_period: int = 0               # ticks per wax/wane cycle (0 = steady)
+    gradient_amplitude: float = 0.0        # 0..1 fractional swing of the gradient
 
     # ------------------------------------------------------------------
     # CI natural decay rate gamma (brief SC2: dR/dt <= -gamma R). In this

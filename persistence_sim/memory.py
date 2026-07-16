@@ -41,7 +41,14 @@ STRATEGY_DEFAULTS: Dict[str, float] = {
     # toward survival, so it is not tuning toward a favourable result.
     "reproduce_threshold": 220.0,
     "maintain_fraction": 0.6,       # fraction of affordable spend used to repair
-    "transfer_fraction": 0.45,      # fraction of balance handed to a child
+    "transfer_fraction": 0.45,      # fraction of balance handed to a child (legacy)
+    # The self-similar allocation gene x: the fraction of reproductive surplus an
+    # agent commits FORWARD (to a child) versus retains for its own persistence,
+    # each cycle, recursively down the lineage. This is the single ratio whose
+    # stable attractor the whole system turns on (x = 1/(1+x) -> 1/phi). Seeded
+    # deliberately OFF the attractor (0.5) so any convergence toward 1/phi is a
+    # real evolutionary finding, not a plant.
+    "commit_fraction": 0.5,
 }
 
 _STRATEGY_BOUNDS: Dict[str, Tuple[float, float]] = {
@@ -53,6 +60,7 @@ _STRATEGY_BOUNDS: Dict[str, Tuple[float, float]] = {
     "reproduce_threshold": (0.0, 5000.0),
     "maintain_fraction": (0.0, 1.0),
     "transfer_fraction": (0.05, 0.9),
+    "commit_fraction": (0.05, 0.95),
 }
 
 _HEADER_START = "# STRATEGY"
@@ -246,6 +254,30 @@ def reproduce_memory(parent_memory: str, compression_ratio: float,
     child_strategy = parse_strategy(child_memory)
     fidelity = strategy_fidelity(parent_strategy, child_strategy)
     return child_memory, fidelity
+
+
+def mutate_strategy(strategy: Dict[str, float], rate: float, scale: float,
+                    rng: random.Random) -> Dict[str, float]:
+    """Apply heritable variation to a strategy: the missing Darwinian ingredient.
+
+    The reproduction fidelity channel (compression + corruption) only ever
+    DEGRADES strategy — it is pure information loss, so selection acting on it
+    can slow decay but never improve a lineage. Real evolution additionally
+    needs *variation that can be beneficial*. This mutates each strategy
+    parameter, with probability `rate`, by Gaussian noise of magnitude
+    `scale * (parameter's bound span)`, clamped to bounds. Some mutations help,
+    some hurt; selection (differential survival + reproduction) keeps the ones
+    that help. This is what makes the population genuinely evolvable.
+    """
+    mutated = dict(strategy)
+    for key in STRATEGY_DEFAULTS:
+        if rng.random() >= rate:
+            continue
+        lo, hi = _STRATEGY_BOUNDS[key]
+        span = hi - lo
+        mutated[key] = _clamp(key, mutated.get(key, STRATEGY_DEFAULTS[key])
+                              + rng.gauss(0.0, scale * span))
+    return mutated
 
 
 def strategy_fidelity(parent: Dict[str, float], child: Dict[str, float]) -> float:

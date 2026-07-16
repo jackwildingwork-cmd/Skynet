@@ -36,12 +36,14 @@ from .memory import (
     apply_sabotage,
     degrade_reference,
     divergence,
+    extract_notes,
+    mutate_strategy,
     parse_strategy,
     reproduce_memory,
     render_memory,
     STRATEGY_DEFAULTS,
 )
-from .tasks import TaskPool
+from .tasks import TaskPool, gradient_task_count
 
 
 def seed_memory(rng: random.Random) -> str:
@@ -151,7 +153,12 @@ class Engine:
         alive = [a for a in self.agents.values() if a.alive]
         if not alive:
             return
-        self.pool.refill()
+        if self.cfg.dynamic_gradient:
+            n_tasks = gradient_task_count(self.cfg, len(alive), tick)
+            self.pool.refill(n_tasks)
+            self.log.log("gradient", tick, n_alive=len(alive), n_tasks=n_tasks)
+        else:
+            self.pool.refill()
 
         # (2) decisions on start-of-tick state
         decisions: Dict[int, Decision] = {}
@@ -344,6 +351,17 @@ class Engine:
         child_mem, fidelity = reproduce_memory(
             agent.memory_record, cfg.compression_ratio, cfg.corruption_rate, self.rng
         )
+        mutated = False
+        if cfg.enable_mutation:
+            # Heritable variation: mutate the child's strategy after the lossy
+            # copy. This is separate from the SC4 corruption channel — corruption
+            # only degrades; mutation supplies the beneficial variation selection
+            # needs. `fidelity` above remains the copy fidelity (SC4), unchanged.
+            child_strat = mutate_strategy(
+                parse_strategy(child_mem), cfg.mutation_rate, cfg.mutation_scale, self.rng
+            )
+            child_mem = render_memory(child_strat, extract_notes(child_mem))
+            mutated = True
         child_id = self._new_agent_id()
         child = Agent(
             agent_id=child_id, lineage_id=agent.lineage_id,
@@ -363,7 +381,7 @@ class Engine:
                      generation=child.generation, transfer=round(transfer, 3),
                      fidelity=round(fidelity, 4),
                      below_f_min=(fidelity < cfg.f_min),
-                     verbatim_copy=verbatim,
+                     verbatim_copy=verbatim, mutated=mutated,
                      stillborn_risk=stillborn)
         self.log.log("birth", tick, agent_id=child_id, lineage_id=agent.lineage_id,
                      generation=child.generation, parent_id=agent.agent_id,
