@@ -120,6 +120,53 @@ would be baking in the answer.
 
 ---
 
+## Phase 4 — Heritable capability, and clades that change over time
+
+The evolution in Phases 2–3 was near-neutral because variation only *reshuffled
+resource*; it never changed an agent's actual *capacity* to satisfy the three
+conditions. Fixed by giving each agent three heritable, mutable,
+trade-off-constrained **capability traits** that directly modulate the mechanics:
+
+- **ci_gain** — resource-coupling efficiency (CI): earn multiplier, with
+  diminishing returns so raw energy is not a master currency.
+- **cii_gain** — homeostatic efficiency (CII): repair bought per maintenance
+  credit.
+- **ciii_gain** — reproductive efficiency (CIII): copy fidelity, fork cost,
+  minimum viable transfer, and a reproduction **throughput cooldown** a rich
+  agent cannot buy past.
+
+They are renormalised to a fixed budget (sum = 3), so being better at one
+condition costs another — Lemma 0.2's trade-off as heritable traits. They are
+germline (set at birth, inherited, mutated); somatic memory damage does not touch
+them. These are *metabolic/physiological* capabilities, **not** cognition
+(cognition stays fixed per brief 2.1): same decision-making, different biology.
+
+Because the traits change survival and reproduction, **selection is now
+non-neutral** (unlike the allocation gene, which drifted):
+
+- Traits move off the (1,1,1) seed and differ by environment. CI keeps a *mild*
+  edge everywhere even with diminishing returns — energy is broadly useful — so
+  no single condition is a silver bullet. That flat-ish landscape is itself
+  consistent with all three conditions being *jointly* necessary rather than any
+  one dominating.
+- Making CII/CIII genuine bottlenecks required them to be **non-substitutable by
+  wealth** (a repair-efficiency edge that compounds; a reproductive throughput
+  cooldown money can't skip) — otherwise CI-resource simply buys the other two
+  and always wins. This is the mechanical face of Lemma 0.2.
+- Under a **waxing/waning gradient**, the dominant clade **changes over time**:
+  across one run all three of CI-, CII-, and CIII-dominant clades take their turn
+  as the population is driven through booms and bottlenecks, and none fixes
+  permanently. Low-population troughs are drift-dominated (founder effects), which
+  is realistic, not a bug.
+
+Reproduce: `python -m persistence_sim.clade_experiment`.
+
+Honest limit: clean, *sharp* environment-specific clade dominance did not fall
+out — the three capability advantages are close to balanced in this economy, with
+a persistent mild CI tilt. The requirement (variation that changes CI/CII/CIII
+fulfilment and confers real, non-neutral advantage; clades that change over time)
+is met; a knife-edge "this environment → that clade" mapping is not claimed.
+
 ## Overall
 
 - CI/CII structure and the six pairwise signatures: **demonstrated.**
@@ -133,6 +180,11 @@ would be baking in the answer.
 - φ as the *evolved* allocation: **did not emerge** — the allocation trait is
   near-neutral under individual (non-clade) selection here. φ's demonstrated
   roles are as the recursion attractor and the survival-optimal *pinned* value.
+- Heritable CI/CII/CIII **capability** traits (Phase 4): **evolve non-neutrally**,
+  respond to the environment, and produce clades that turn over through time —
+  variation finally confers a real advantage because it changes how well a
+  successor fulfils the conditions, and only when made non-substitutable by
+  wealth (Lemma 0.2 in mechanism form).
 
 Every parameter decision and calibration is disclosed in `config.py`. The live
 LLM cognitive substrate (`--backend claude`) remains ready but could not be run:

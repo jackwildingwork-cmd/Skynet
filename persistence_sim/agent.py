@@ -64,6 +64,10 @@ class Agent:
 
     birth_tick: int = 0
     inherited_fidelity: float = 1.0   # fidelity of the copy that created it
+    # Heritable capability traits, fixed at birth (germline). Parity by default;
+    # populated from the (mutated, inherited) genome when traits are enabled.
+    traits: dict = field(default_factory=lambda: {
+        "ci_gain": 1.0, "cii_gain": 1.0, "ciii_gain": 1.0})
 
     # Bookkeeping for metrics (captured from tick 1, brief 6).
     offspring_ids: List[int] = field(default_factory=list)
@@ -79,6 +83,7 @@ class Agent:
     # attribution (entropy is the ambient floor; sabotage is competitive).
     entropy_received_chars: float = 0.0
     sabotage_received_chars: float = 0.0
+    last_repro_tick: int = -1_000_000_000   # for the CIII reproduction cooldown
 
     @property
     def alive(self) -> bool:

@@ -170,6 +170,30 @@ class Config:
     self_similar_reproduction: bool = False
     reproduce_surplus_floor: float = 40.0   # min surplus above reserve to fork at all
 
+    # ------------------------------------------------------------------
+    # Heritable CAPABILITY traits (clade evolution). When enabled, each agent
+    # carries three trade-off-constrained trait genes (ci_gain, cii_gain,
+    # ciii_gain, renormalised to sum TRAIT_TOTAL) that directly modulate how well
+    # it fulfils CI, CII, and CIII respectively. Mutation moves a successor along
+    # this simplex, so variation changes the successor's ability to satisfy one
+    # or more conditions better/worse than its peers — a real, non-neutral
+    # advantage whose sign depends on the environment. Set at birth (germline);
+    # somatic memory damage (sabotage/entropy) does not alter them. Different
+    # gradients select different trait allocations, so clades rise and fall.
+    # ------------------------------------------------------------------
+    enable_traits: bool = False
+    # Diminishing-returns exponent on the CI resource-coupling trait (energetics:
+    # you can only metabolise so much). effective earn multiplier = ci_gain**exp.
+    # 1.0 = linear (CI a master currency that wins everywhere); <1 lets CI
+    # saturate in rich environments so CII/CIII can be the deciding bottleneck.
+    ci_returns_exp: float = 0.6
+    # Base ticks an agent must wait between forks (0 = no cooldown). With traits
+    # on, the effective cooldown is reproduce_cooldown / ciii_gain, so CIII sets
+    # reproductive THROUGHPUT — a bottleneck wealth cannot buy past. In a
+    # reproduction-limited (abundant, calm) environment this makes CIII the
+    # selected clade; elsewhere CI (resource) or CII (upkeep) can dominate.
+    reproduce_cooldown: float = 0.0
+
     # Fidelity floor below which a successor is deemed unable to inherit
     # enough structure to independently satisfy CI/CII (CIII(c) f_min).
     # Measured empirically; this is the reporting threshold, not a hard gate.

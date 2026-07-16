@@ -162,12 +162,21 @@ both togglable in `Config` and off by default:
   `gradient_scaling_exp` (α). α = 1 scale-free, α < 1 crowding, α > 1 synergy;
   `gradient_period`/`gradient_amplitude` make it wax and wane.
 
-The full narrative — including that persistence is only achieved under a
-coverage-scaling gradient, that the gradient's exponent decides the outcome, and
-that φ is the recursion attractor and the survival-optimal *pinned* allocation
-but does **not** spontaneously evolve here (individual, not clade, selection) —
-is in **[FINDINGS.md](FINDINGS.md)**. Reproduce Phase 3 with
-`python -m persistence_sim.gradient_experiment`.
+- **`enable_traits`** — three heritable, mutable, trade-off-constrained
+  *capability* traits (`ci_gain`, `cii_gain`, `ciii_gain`, renormalised to a
+  fixed budget) that directly change how well a successor fulfils CI, CII, and
+  CIII. This is what makes variation confer a *real, non-neutral* advantage:
+  unlike the near-neutral allocation gene, these evolve and produce clades that
+  turn over through time under a fluctuating gradient. Germline (set at birth,
+  inherited, mutated); metabolic, not cognitive (cognition stays fixed).
+
+The full narrative — persistence only under a coverage-scaling gradient; the
+gradient's exponent deciding the outcome; φ as the recursion attractor and
+survival-optimal *pinned* allocation but not a spontaneously-evolved one; and
+heritable CI/CII/CIII capability traits producing clades that change over time —
+is in **[FINDINGS.md](FINDINGS.md)**. Reproduce with
+`python -m persistence_sim.gradient_experiment` (Phase 3) and
+`python -m persistence_sim.clade_experiment` (Phase 4).
 
 ## Findings (Phase 1: mock cognitive substrate, ensemble of 24 seeds)
 

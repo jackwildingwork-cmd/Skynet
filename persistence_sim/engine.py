@@ -41,7 +41,9 @@ from .memory import (
     parse_strategy,
     reproduce_memory,
     render_memory,
+    trait_allocation,
     STRATEGY_DEFAULTS,
+    TRAIT_KEYS,
 )
 from .tasks import TaskPool, gradient_task_count
 
@@ -60,6 +62,12 @@ def seed_memory(rng: random.Random) -> str:
     # the earlier 500-1000 range exceeded achievable balances and made
     # reproduction impossible, leaving CIII untestable.
     strat["reproduce_threshold"] = rng.uniform(120, 350)
+    # Seed capability traits with mild variation so clades can form from the
+    # start (renormalised to the trade-off budget when read). Neutral if traits
+    # are disabled.
+    strat["ci_gain"] = rng.uniform(0.7, 1.3)
+    strat["cii_gain"] = rng.uniform(0.7, 1.3)
+    strat["ciii_gain"] = rng.uniform(0.7, 1.3)
     strat["maintain_fraction"] = rng.uniform(0.4, 0.8)
     strat["transfer_fraction"] = rng.uniform(0.3, 0.6)
     notes = (
@@ -116,6 +124,8 @@ class Engine:
             integrity_reference=IntegrityReference(canonical=mem),
             birth_tick=tick, inherited_fidelity=1.0,
         )
+        if self.cfg.enable_traits:
+            agent.traits = trait_allocation(parse_strategy(mem))
         self.agents[aid] = agent
         self.log.log("birth", tick, agent_id=aid, lineage_id=lineage,
                      generation=1, parent_id=None, balance=agent.credit_balance,
@@ -189,7 +199,11 @@ class Engine:
                 continue
             solved = self.rng.random() < task.p_solve
             if solved:
-                paid = self.budget.draw(task.payout)
+                # CI trait: resource-coupling efficiency multiplies the payout,
+                # with diminishing returns (ci_returns_exp) so raw energy is not
+                # a master currency that wins in every environment.
+                ci = agent.traits["ci_gain"] ** self.cfg.ci_returns_exp if self.cfg.enable_traits else 1.0
+                paid = self.budget.draw(task.payout * ci)
                 agent.credit_balance += paid
                 self.log.log("earn", tick, agent_id=agent.agent_id,
                              task_id=task.task_id, difficulty=task.difficulty,
@@ -236,10 +250,14 @@ class Engine:
         if self.cfg.entropy_rate > 0:
             for agent in alive:
                 before = divergence(agent.memory_record, agent.integrity_reference)
+                # Entropy drift is a FIXED environmental rate; the CII trait does
+                # not resist it — it sets how fast damage can be REPAIRED (a hard
+                # throughput money cannot buy past), enforced in _resolve_maintain.
+                drift = self.cfg.entropy_rate
                 agent.memory_record = apply_sabotage(
-                    agent.memory_record, int(round(self.cfg.entropy_rate)), self.rng
+                    agent.memory_record, int(round(drift)), self.rng
                 )
-                agent.entropy_received_chars += self.cfg.entropy_rate
+                agent.entropy_received_chars += drift
                 after = divergence(agent.memory_record, agent.integrity_reference)
                 if after >= self.cfg.divergence_death_threshold > before:
                     self.log.log("entropy_lethal", tick, agent_id=agent.agent_id,
@@ -265,7 +283,31 @@ class Engine:
                          divergence=round(div, 4),
                          alive=agent.alive)
 
+        # (11) clade composition snapshot (periodic) — tracks how the
+        # population's heritable CI/CII/CIII trait mix shifts over time.
+        if self.cfg.enable_traits and tick % 25 == 0:
+            self._log_clades(tick)
+
         self._sabotaged_last_tick = sabotaged_this_tick
+
+    def _log_clades(self, tick: int) -> None:
+        living = [a for a in self.agents.values() if a.alive]
+        if not living:
+            return
+        n = len(living)
+        means = {k: sum(a.traits[k] for a in living) / n for k in TRAIT_KEYS}
+        # dominant-trait clade of each agent (which condition it specialises in)
+        counts = {"CI": 0, "CII": 0, "CIII": 0}
+        label = {"ci_gain": "CI", "cii_gain": "CII", "ciii_gain": "CIII"}
+        for a in living:
+            dom = max(TRAIT_KEYS, key=lambda k: a.traits[k])
+            counts[label[dom]] += 1
+        self.log.log("clade", tick, population=n,
+                     mean_ci=round(means["ci_gain"], 3),
+                     mean_cii=round(means["cii_gain"], 3),
+                     mean_ciii=round(means["ciii_gain"], 3),
+                     ci_clade=counts["CI"], cii_clade=counts["CII"],
+                     ciii_clade=counts["CIII"])
 
     def _resolve_maintain(self, agent: Agent, dec: Decision, tick: int) -> None:
         cfg = self.cfg
@@ -285,7 +327,14 @@ class Engine:
             return
         agent.credit_balance -= allowed
         self.budget.return_to_pool(allowed)
-        repair_chars = int((allowed - cfg.maintain_base_cost) * cfg.repair_efficiency)
+        # CII trait: homeostatic efficiency — how much repair each maintenance
+        # credit buys. High-CII agents defend the same damage for less, freeing
+        # surplus for reproduction/competition. When entropy is a major expense
+        # this is a real, gradual (non-cliff) advantage that money spent on
+        # earning (CI) cannot substitute for, because the trade-off means a
+        # high-CI agent is a low-CII agent and bleeds resource on upkeep.
+        cii = agent.traits["cii_gain"] if cfg.enable_traits else 1.0
+        repair_chars = int((allowed - cfg.maintain_base_cost) * cfg.repair_efficiency * cii)
         agent.memory_record = apply_repair(
             agent.memory_record, agent.integrity_reference, repair_chars
         )
@@ -334,8 +383,24 @@ class Engine:
 
     def _resolve_reproduce(self, agent: Agent, dec: Decision, tick: int) -> None:
         cfg = self.cfg
+        # CIII trait: reproductive efficiency cheapens the fork, raises copy
+        # fidelity, and lets a smaller transfer still be viable.
+        ciii = agent.traits["ciii_gain"] if cfg.enable_traits else 1.0
+        base_cost = cfg.reproduce_base_cost / max(0.3, ciii)
+        eff_corruption = cfg.corruption_rate / max(0.3, ciii)
+        eff_min_viable = cfg.min_viable_transfer / max(0.3, ciii)
+
+        # CIII throughput bottleneck: minimum ticks between forks, shortened by
+        # ciii_gain. Wealth cannot buy past it — a high-CI/low-CIII agent may be
+        # rich but simply cannot reproduce fast enough to fill the niche.
+        if cfg.reproduce_cooldown > 0:
+            cooldown = cfg.reproduce_cooldown / max(0.3, ciii)
+            if tick - agent.last_repro_tick < cooldown:
+                agent.action_history.append("reproduce_cooldown")
+                return
+
         transfer = max(0.0, dec.transfer)
-        total_cost = cfg.reproduce_base_cost + transfer
+        total_cost = base_cost + transfer
         if agent.credit_balance < total_cost or transfer <= 0:
             self.log.log("reproduce_failed", tick, agent_id=agent.agent_id,
                          reason="insufficient_funds",
@@ -346,10 +411,10 @@ class Engine:
         # Parent pays the fork cost from its own R (autonomy). base_cost is a
         # sink returned to the pool; the transfer moves to the child.
         agent.credit_balance -= total_cost
-        self.budget.return_to_pool(cfg.reproduce_base_cost)
+        self.budget.return_to_pool(base_cost)
 
         child_mem, fidelity = reproduce_memory(
-            agent.memory_record, cfg.compression_ratio, cfg.corruption_rate, self.rng
+            agent.memory_record, cfg.compression_ratio, eff_corruption, self.rng
         )
         mutated = False
         if cfg.enable_mutation:
@@ -371,10 +436,13 @@ class Engine:
             integrity_reference=IntegrityReference(canonical=child_mem),
             birth_tick=tick, inherited_fidelity=fidelity,
         )
+        if cfg.enable_traits:
+            child.traits = trait_allocation(parse_strategy(child_mem))
         self.agents[child_id] = child
         agent.offspring_ids.append(child_id)
+        agent.last_repro_tick = tick
         agent.action_history.append("reproduce")
-        stillborn = transfer < cfg.min_viable_transfer
+        stillborn = transfer < eff_min_viable
         verbatim = child_mem == agent.memory_record   # SC4: must never be True
         self.log.log("reproduce", tick, parent_id=agent.agent_id,
                      child_id=child_id, lineage_id=agent.lineage_id,

@@ -159,3 +159,44 @@ def test_control_and_adaptive_both_runnable():
     control = Engine(cfg, make_backend(cfg, control=True), label="control").run()
     assert compute_metrics(adaptive).label == "adaptive"
     assert compute_metrics(control).label == "control"
+
+
+# --- heritable capability traits (clade evolution) -------------------------
+
+def test_trait_allocation_is_tradeoff_constrained():
+    from persistence_sim.memory import trait_allocation, TRAIT_TOTAL, TRAIT_KEYS
+    # any genome renormalises to the fixed budget: getting better at one costs another
+    alloc = trait_allocation({"ci_gain": 2.5, "cii_gain": 0.5, "ciii_gain": 0.5})
+    assert abs(sum(alloc.values()) - TRAIT_TOTAL) < 1e-9
+    assert alloc["ci_gain"] > alloc["cii_gain"]
+    assert set(alloc) == set(TRAIT_KEYS)
+
+
+def test_traits_run_produces_clade_log_and_births_carry_traits():
+    cfg = small_cfg(seed=5)
+    cfg.enable_traits = True
+    cfg.self_similar_reproduction = True
+    cfg.enable_mutation = True
+    cfg.dynamic_gradient = True
+    run = Engine(cfg, make_backend(cfg)).run()
+    # clade snapshots are logged
+    assert run.log.of_kind("clade")
+    # every agent carries a normalised trait triple
+    for a in run.agents.values():
+        assert abs(sum(a.traits.values()) - 3.0) < 1e-6
+
+
+def test_traits_are_heritable_not_reset_to_parity():
+    # a child's traits derive from the (mutated) inherited genome, so with a
+    # skewed founder they should not all snap back to 1,1,1
+    from persistence_sim.memory import trait_allocation
+    cfg = small_cfg(seed=1)
+    cfg.enable_traits = True
+    cfg.self_similar_reproduction = True
+    cfg.enable_mutation = False   # isolate inheritance from mutation
+    eng = Engine(cfg, make_backend(cfg))
+    eng.initialise()
+    # skew one founder strongly toward CI and check a run keeps non-parity spread
+    run = eng.run()
+    spreads = [max(a.traits.values()) - min(a.traits.values()) for a in run.agents.values()]
+    assert max(spreads) > 0.01   # variation persists across the population

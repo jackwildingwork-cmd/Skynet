@@ -49,7 +49,23 @@ STRATEGY_DEFAULTS: Dict[str, float] = {
     # deliberately OFF the attractor (0.5) so any convergence toward 1/phi is a
     # real evolutionary finding, not a plant.
     "commit_fraction": 0.5,
+    # ---- Heritable CAPABILITY traits (distinct from the policy genes above) ----
+    # These change how well a successor actually FULFILS each of the three
+    # conditions, relative to its peers — which is what makes variation confer a
+    # real, non-neutral advantage. They are metabolic/physiological, NOT
+    # cognitive (cognition stays fixed per brief 2.1): same decision-making, but
+    # a body that couples to the gradient (CI), repairs itself (CII), or
+    # reproduces faithfully (CIII) better or worse. They are held on a fixed
+    # BUDGET (they are renormalised to sum to TRAIT_TOTAL), so getting better at
+    # one condition necessarily costs another — the CI/CII/CIII trade-off of
+    # Lemma 0.2, now at the level of heritable traits. Seeded at parity (1,1,1).
+    "ci_gain": 1.0,    # resource-coupling efficiency (CI): earn multiplier
+    "cii_gain": 1.0,   # homeostatic efficiency (CII): repair + entropy resistance
+    "ciii_gain": 1.0,  # reproductive efficiency (CIII): fidelity, cost, viability
 }
+
+TRAIT_KEYS = ("ci_gain", "cii_gain", "ciii_gain")
+TRAIT_TOTAL = 3.0    # traits are renormalised to this sum: a strict trade-off.
 
 _STRATEGY_BOUNDS: Dict[str, Tuple[float, float]] = {
     "earn_weight": (0.0, 1.0),
@@ -61,7 +77,25 @@ _STRATEGY_BOUNDS: Dict[str, Tuple[float, float]] = {
     "maintain_fraction": (0.0, 1.0),
     "transfer_fraction": (0.05, 0.9),
     "commit_fraction": (0.05, 0.95),
+    "ci_gain": (0.05, 2.9),
+    "cii_gain": (0.05, 2.9),
+    "ciii_gain": (0.05, 2.9),
 }
+
+
+def trait_allocation(strategy: dict) -> dict:
+    """Return the three capability traits renormalised to sum to TRAIT_TOTAL.
+
+    Enforces the strict trade-off: an agent that is better than parity at one
+    condition is necessarily worse at another. This is where mutation's real
+    (non-neutral) advantage lives — it moves a successor along this simplex.
+    """
+    vals = [max(0.05, float(strategy.get(k, 1.0))) for k in TRAIT_KEYS]
+    s = sum(vals)
+    if s <= 0:
+        return {k: 1.0 for k in TRAIT_KEYS}
+    scale = TRAIT_TOTAL / s
+    return {k: v * scale for k, v in zip(TRAIT_KEYS, vals)}
 
 _HEADER_START = "# STRATEGY"
 _NOTES_START = "# NOTES"
