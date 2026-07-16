@@ -5,6 +5,7 @@ gate: the evolutionary layer may only be built on a core that passes these.
 """
 
 import math
+import statistics
 
 import numpy as np
 import pytest
@@ -119,3 +120,55 @@ def test_full_battery_passes():
     checks = run_all(seed=0)
     failed = [k for k, c in checks.items() if not c.passed]
     assert not failed, f"failed checks: {failed}"
+
+
+# --- evolutionary layer -----------------------------------------------------
+
+def test_evolution_persists_via_reproduction():
+    from thermoevo.constants import Thermo
+    from thermoevo.evolve import EvoConfig, run
+    cfg = EvoConfig(th=Thermo(dE_copy_max=4.0), rho=0.9, init_pop=40,
+                    ticks=1500, probe_interval=300, seed=0)
+    r = run(cfg)
+    assert r.ended == "completed" and r.final_pop > 0        # class persists
+    gens = [h["mean_gen"] for h in r.history if "mean_gen" in h]
+    assert gens[-1] >= 5.0 and gens[-1] > gens[0]            # many generations deep: founders replaced
+
+
+def test_predictive_coupling_only_when_predictable():
+    from thermoevo.constants import Thermo
+    from thermoevo.evolve import EvoConfig, run
+    def pinfo(rho):
+        cfg = EvoConfig(th=Thermo(dE_copy_max=4.0), rho=rho, init_pop=50,
+                        ticks=1600, probe_interval=400, seed=1)
+        r = run(cfg)
+        pr = [h["pred_info"] for h in r.history if "pred_info" in h]
+        return statistics.mean(pr[-2:])
+    assert pinfo(0.0) < 0.03                                 # white: no prediction possible
+    assert pinfo(0.95) > pinfo(0.0)                          # predictable: predictive coupling
+
+
+# --- spatial foraging world -------------------------------------------------
+
+def test_world_persists_and_forages():
+    from thermoevo.world import WorldConfig, run
+    r = run(WorldConfig(seed=0, ticks=2000, probe_interval=400))
+    assert r.ended == "completed" and r.final_pop > 0        # class persists by foraging
+    gens = [h["mean_gen"] for h in r.history if "mean_gen" in h]
+    assert gens[-1] >= 4.0                                    # many generations of turnover
+
+
+def test_foraging_intelligence_evolves_above_random():
+    from thermoevo.world import WorldConfig, World, run
+    import numpy as np
+    # random-genome baseline chemotaxis
+    w = World(WorldConfig(seed=7, ticks=10))
+    for t in range(1, 40):
+        if w.size == 0:
+            break
+        w.step(t)
+    base = float(np.mean(w._chemo))
+    r = run(WorldConfig(seed=7, ticks=4000))
+    ev = [h["chemotaxis"] for h in r.history if "chemotaxis" in h]
+    evolved = statistics.mean(ev[-3:])
+    assert evolved > base + 0.1                               # gradient-climbing evolves

@@ -79,15 +79,106 @@ thermoevo/
   branching.py     CIII: extinction probability q (analytic + MC), error catastrophe
   environment.py   structured predictable gradient (θ AR(1) + noisy cue)
   controller.py    fixed reactive vs predictive (Kalman) controllers; predictive info
-  validate.py      the milestone battery
-run_milestone.py   prints the battery
+  validate.py      the milestone-1 battery
+  genome.py        evolvable recurrent-controller genome (well-mixed model)
+  evolve.py        milestone-2 engine (well-mixed shared gradient, branching)
+  evo_experiment.py  the milestone-2 sweeps
+  neuralnet.py     general recurrent controller (vector I/O) for the spatial world
+  field.py         discrete, patchy, capped, replenishing resource field
+  world.py         milestone-3 spatial foraging evolution
+  world_experiment.py  the milestone-3 experiment
+run_milestone.py   prints the milestone-1 battery
 ```
 
-## Next (not yet built)
+## Milestone 2: evolution on the substrate
 
-The evolutionary layer: an evolvable controller (compact recurrent net) as the
-heritable genome, mutated at the thermodynamically-forced rate `1−R_n`; a finite
-shared gradient so selection is real; reproduction as the branching step. Then run
-it and watch what evolves — whether predictive machinery arises, how its complexity
-scales with environmental predictability, and where the error-catastrophe ceiling
-on sustainable intelligence sits.
+The evolutionary layer (`genome.py`, `evolve.py`): a population of compact
+recurrent-controller genomes on a finite shared gradient. Variation is **forced,
+not coded** — offspring weights are perturbed with magnitude `mut·μ`,
+`μ = exp(−Ω·ΔE/k_BT)` (the paper's VAR rate), so temperature and integrity set the
+mutation rate. Selection is **not imposed** — it is the finite gradient split by
+match quality. Reproduction is the branching step. `python -m thermoevo.evo_experiment`:
+
+**Persistence is reproduction-carried.** Populations run tens of generations of
+turnover (founders replaced), the class persisting while every individual dies —
+exactly the paper's class-vs-instance distinction, now with intrinsic Gompertz
+mortality emerging from the Ω dynamics.
+
+**Prediction evolves only when the environment affords it.** Predictive
+information the evolved controllers carry about the gradient, vs predictability ρ:
+
+| ρ | 0.00 | 0.30 | 0.60 | 0.90 | 0.98 |
+|---|---|---|---|---|---|
+| evolved predictive info (nats) | 0.000 | 0.019 | 0.087 | 0.269 | 0.412 |
+| evolved coupling skill | 0.309 | 0.342 | 0.377 | 0.449 | 0.488 |
+
+Zero when the gradient is white (nothing to predict), rising monotonically with
+predictability. Intelligence is rewarded in proportion to how predictable the
+world is — now as an *evolved* outcome, not a designed one.
+
+**There is a thermodynamic evolvability window.** Because variation is forced by
+temperature, adaptation (selection improving coupling over generations) happens
+only in an intermediate `μ` band:
+
+| ΔE (→ μ at Ω=1) | 3.0 (0.050) | 4.0 (0.018) | 5.0 (0.007) | 6.0 (0.002) |
+|---|---|---|---|---|
+| skill change over generations | −0.005 | **+0.023** | **+0.032** | +0.009 |
+| regime | mutation load | adapts | adapts | frozen |
+
+Too much forced variation degrades the genome (Muller's ratchet / error-catastrophe
+side); too little freezes evolution. The Goldilocks band is a direct consequence of
+the mutation–selection–drift balance the theory predicts.
+
+**Honest limits.** These are directional, drift/load-limited effect sizes (small
+populations, forced variation, pure-mutation controller evolution) — the ρ sweep
+is clean and monotone; the skill deltas are modest but consistent. And there is no
+hard extinction-catastrophe here, because the proportional gradient always feeds
+someone: high `μ` degrades skill rather than collapsing the population. A true
+error-catastrophe-to-extinction would need coupling to be survival-critical
+(absolute rather than proportional capture) — a deliberate next step, not yet built.
+
+## Milestone 3: foraging a discrete, replenishing gradient world
+
+The well-mixed gradient of milestones 1–2 is replaced by an environment that
+better reflects a real one (`field.py`, `world.py`, `world_experiment.py`):
+**discrete fertile patches** on a torus that **regrow to a fixed capped total**
+(not scaled to the population), which agents must **find**. Condition I is now
+explicit and local — intake must exceed the cost of *finding* (moving) and
+consuming, or structural stock drifts to the absorbing boundary. Agents sense
+their local resource gradient and hunger; their evolved recurrent controller
+chooses a move; they compete for patches that deplete when eaten. Selection acts
+on nothing but net-positive foraging. `python -m thermoevo.world_experiment`:
+
+**Foraging intelligence evolves.** Chemotaxis alignment — how well an agent's
+movement climbs the sensed resource gradient — rises from the random-genome
+baseline **0.13 → 0.45** (×3.6) over ~12–18 generations, while the population
+self-regulates at a carrying capacity set by the field (not by the population),
+and every individual dies while the class persists.
+
+**The value of that intelligence depends on the field's structure.** Sweeping
+patch density (evolved chemotaxis):
+
+| patches | 30 | 60 | 120 | 240 |
+|---|---|---|---|---|
+| evolved chemotaxis | 0.16 | 0.42 | 0.45 | 0.49 |
+| carrying capacity | 36 | 42 | 80 | 152 |
+
+**Denser** patches evolve *more* gradient-climbing — a denser field is spatially
+continuous and followable, so chemotaxis pays. Sparse isolated patches leave gaps
+where climbing doesn't help and finding falls back on exploration and luck; the
+population is smaller but still persists (no extinction reached in this range).
+This was the opposite of the initial guess and is reported as found.
+
+Competition (patch depletion, density-dependent capacity) and luck (stochastic
+encounters, offspring scatter) are active in this substrate; cooperation is not
+built in and did not appear. Effect sizes here are large and clean — the spatial
+"finding" structure gives selection a much stronger handle than the well-mixed
+model did.
+
+## Next
+
+Surface the extinction-catastrophe (sparser/again, or survival-critical coupling);
+add moving or seasonally-appearing patches so temporal prediction (not just
+spatial gradient-climbing) is rewarded; let controller size/topology evolve so
+complexity can deepen; and add a mechanism where cooperation could pay, to see
+whether it emerges.

@@ -25,6 +25,9 @@ from .branching import (
 from .environment import Gradient
 from .controller import reactive_capture, predictive_capture, predictive_information
 from .validate import run_all, Check
+from .field import ResourceField
+from .neuralnet import NetSpec
+from .world import WorldConfig, World, run as run_world
 
 __all__ = [
     "Thermo", "DEFAULT",
@@ -33,4 +36,5 @@ __all__ = [
     "extinction_probability", "basic_reproduction_number", "simulate_lineage_extinction",
     "Gradient", "reactive_capture", "predictive_capture", "predictive_information",
     "run_all", "Check",
+    "ResourceField", "NetSpec", "WorldConfig", "World", "run_world",
 ]
