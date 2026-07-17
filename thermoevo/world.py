@@ -59,6 +59,28 @@ class WorldConfig:
     landauer_cost: float = 2.0
     mut_scale: float = 1.0
     child_scatter: float = 2.0
+    # n-1 coordination (multicellularity): adhesive same-clade cells that share a
+    # location bond into an organism and POOL structural stock N_s (rich cells
+    # subsidise starving kin), buffering members against the boom-bust boundary.
+    # Off by default so the validated foraging core is unchanged.
+    adhesion: bool = False
+    clade_bins: int = 24             # kin resolution: same bin = same clade
+    clade_drift: float = 0.01        # heritable clade tag drift per birth
+    bond_thr: float = 0.5            # sigmoid(adhesion gene) above this -> will bond
+    share: float = 0.25             # fraction of the gap to the organism mean, per tick
+    share_overhead: float = 0.03    # N_s cost of being coordinated, per bonded cell/tick
+    cohesion: float = 0.0            # aggregation: pull toward same-clade neighbours,
+                                     # scaled by sigmoid(adhesion). 0 = no aggregation
+                                     # (adhesive kin must meet by chance). This is the
+                                     # prerequisite the sharing benefit needs to pay.
+    # group-level reproduction (fitness export): an organism that is large and rich
+    # enough BUDS a propagule as a unit. This is what makes cooperation pay — it
+    # exports fitness to the higher level (Michod). Off by default.
+    group_repro: bool = False
+    org_repro_min: int = 4           # organism must have >= this many cells to bud
+    org_repro_thr: float = 60.0      # ... and this much pooled N_s
+    org_propagule: int = 3           # cells released per budding event
+    org_propagule_cost: float = 26.0 # N_s levied across the organism to bud
     # run
     ticks: int = 4000
     probe_interval: int = 200
@@ -96,7 +118,14 @@ class World:
         self.Ns = np.full(n, cfg.repro_threshold * 0.6)
         self.depth = np.full(n, cfg.th.dV_max)
         self.generation = np.ones(n, dtype=int)
+        # n-1 coordination state (carried always; only used when cfg.adhesion)
+        self.adh = self.rng.standard_normal(n) * 0.5          # adhesion gene (logit)
+        self.clade = self.rng.random(n)                       # heritable kin tag in [0,1)
+        self.bonded = np.zeros(n, dtype=bool)                 # in an organism this tick
         self._chemo = []   # rolling chemotaxis alignment samples
+        self._last_org = np.array([], dtype=int)              # organism sizes this tick
+        # cumulative buffering accounting (starvation deaths, bonded vs solitary)
+        self._b_alive = 0; self._b_starved = 0; self._s_alive = 0; self._s_starved = 0
 
     @property
     def size(self) -> int:
@@ -142,6 +171,10 @@ class World:
             self._chemo.append(float(align.mean()))
 
         self.pos = (self.pos + move) % cfg.W
+        # aggregation: adhesive cells drift toward same-clade neighbours (the
+        # prerequisite for bonding). Driven by the same adhesion gene.
+        if cfg.adhesion and cfg.cohesion > 0.0:
+            self._cohere()
         nix, niy = self._cells(self.pos)
         intake = self.producers.graze(nix, niy, np.full(self.size, cfg.max_intake))
 
@@ -149,6 +182,17 @@ class World:
         F_drift = intake - cfg.occupancy - move_cost - cfg.homeostasis_spend
         noise = np.sqrt(2.0 * cfg.gamma_n * cfg.th.kBT * cfg.dt) * self.rng.standard_normal(self.size)
         self.Ns = self.Ns + (F_drift - cfg.gamma_n * self.Ns) * cfg.dt + noise
+
+        # n-1 coordination: bonded organisms pool N_s BEFORE the death boundary is
+        # tested, so a starving cell can be rescued by richer clade-mates.
+        bonded = np.zeros(self.size, dtype=bool)
+        if cfg.adhesion:
+            bonded, self._last_org, comps = self._organisms_share(nix, niy)
+            if cfg.group_repro and comps:
+                self._group_reproduce(comps)                    # organisms bud as units
+                if self.size > bonded.size:
+                    bonded = np.concatenate([bonded, np.zeros(self.size - bonded.size, dtype=bool)])
+            self.bonded = bonded
 
         # integrity maintenance + Kramers escape (structural death)
         damage = cfg.th.damage_rate * cfg.th.dV_max * cfg.dt
@@ -158,18 +202,143 @@ class World:
         escaped = self.rng.random(self.size) < p_escape
 
         alive = (self.Ns > 0.0) & (~escaped)
+        if cfg.adhesion:
+            # attribute starvation (N_s boundary) deaths to bonded vs solitary cells
+            starved = self.Ns <= 0.0
+            self._b_alive += int(bonded.sum()); self._b_starved += int((bonded & starved).sum())
+            self._s_alive += int((~bonded).sum()); self._s_starved += int((~bonded & starved).sum())
         self._compact(alive)
         if self.size == 0:
             return
         can = (self.Ns > cfg.repro_threshold) & (self.Ns > cfg.repro_transfer + cfg.landauer_cost)
+        if cfg.adhesion and cfg.group_repro:
+            can = can & (~self.bonded)               # bonded cells breed only via the organism
         idx = np.nonzero(can)[0]
         if idx.size:
             self._reproduce(idx)
+
+    def _cohere(self):
+        """Pull each cell toward the centroid of same-clade cells in its 3x3
+        neighbourhood, with strength cohesion * sigmoid(adhesion). Adhesive kin
+        aggregate; non-adhesive cells barely move. Vectorised over a dense
+        (cell x clade-bin) grid."""
+        cfg = self.cfg; W = cfg.W; B = cfg.clade_bins
+        ix, iy = self._cells(self.pos)
+        cbin = np.floor(self.clade * B).astype(int) % B
+        key = (ix * W + iy) * B + cbin
+        K = W * W * B
+        gc = np.zeros(K); gx = np.zeros(K); gy = np.zeros(K)
+        np.add.at(gc, key, 1.0)
+        np.add.at(gx, key, self.pos[:, 0]); np.add.at(gy, key, self.pos[:, 1])
+        sx = np.zeros(self.size); sy = np.zeros(self.size); sc = np.zeros(self.size)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                nkey = (((ix + dx) % W) * W + ((iy + dy) % W)) * B + cbin
+                sx += gx[nkey]; sy += gy[nkey]; sc += gc[nkey]
+        adh = 1.0 / (1.0 + np.exp(-self.adh))
+        k = (cfg.cohesion * adh)[:, None]
+        target = np.stack([sx / sc, sy / sc], axis=1)
+        self.pos = (self.pos + k * (target - self.pos)) % W
+
+    def _organisms_share(self, ix, iy):
+        """Bond adhesive (sigmoid(adh) >= bond_thr) same-clade cells that lie in the
+        same OR an adjacent cell into an organism (a connected neighbourhood, so
+        members occupy DIFFERENT cells and graze without scrambling against each
+        other), and pool their N_s toward the organism mean (minus a coordination
+        overhead). Pooling conserves N_s within the organism, so it is pure variance
+        reduction across kin — group-level homeostasis (CII). Returns a per-cell
+        `bonded` mask and the organism sizes. O(N) via cell/clade representatives."""
+        cfg = self.cfg; B = cfg.clade_bins
+        adh = 1.0 / (1.0 + np.exp(-self.adh))
+        idx_e = np.nonzero(adh >= cfg.bond_thr)[0]
+        bonded = np.zeros(self.size, dtype=bool)
+        if idx_e.size < 2:
+            return bonded, np.array([], dtype=int), []
+        exx = ix[idx_e]; eyy = iy[idx_e]
+        cbin = (np.floor(self.clade[idx_e] * B).astype(int) % B)
+        ne = idx_e.size
+        parent = list(range(ne))
+        def find(x):
+            r = x
+            while parent[r] != r: r = parent[r]
+            while parent[x] != r: parent[x], x = r, parent[x]
+            return r
+        def union(a, b):
+            ra, rb = find(a), find(b)
+            if ra != rb: parent[ra] = rb
+        # representative local-index per (cell, clade-bin); union same-key members
+        reps = {}
+        for a in range(ne):
+            k = (exx[a], eyy[a], cbin[a])
+            r = reps.get(k)
+            if r is None: reps[k] = a
+            else: union(a, r)
+        # union representatives across adjacent cells sharing a clade-bin
+        for (cx, cy, cb), a in reps.items():
+            for dx, dy in ((1, 0), (0, 1), (1, 1), (1, -1)):
+                nb = reps.get((cx + dx, cy + dy, cb))
+                if nb is not None: union(a, nb)
+        # gather components
+        groups = {}
+        for a in range(ne):
+            r = find(a); groups.setdefault(r, []).append(a)
+        sizes = []; comps = []
+        for mem in groups.values():
+            if len(mem) < 2: continue
+            gi = idx_e[mem]
+            mean = self.Ns[gi].mean()
+            self.Ns[gi] += cfg.share * (mean - self.Ns[gi]) - cfg.share_overhead
+            bonded[gi] = True; sizes.append(len(mem)); comps.append(gi)
+        return bonded, np.array(sizes, dtype=int), comps
+
+    def _group_reproduce(self, comps):
+        """The organism reproduces as a higher-level individual (fitness export): each
+        member rich enough to breed buds ONE offspring, at the same per-cell cost as
+        solitary reproduction, but the offspring are released together at the
+        organism's centroid so they re-form an organism (assortment). Bonded members
+        do NOT also reproduce individually (see step) — their fitness is the group's.
+        The only differences from solitary reproduction are therefore (a) prior N_s
+        sharing and (b) offspring assortment; whether that nets positive is left to
+        selection."""
+        cfg = self.cfg
+        gsz, gpos, gadh, gcl, ggen, gdep = [], [], [], [], [], []
+        for gi in comps:
+            if gi.size < cfg.org_repro_min:
+                continue
+            rich = gi[(self.Ns[gi] > cfg.repro_threshold) &
+                      (self.Ns[gi] > cfg.repro_transfer + cfg.landauer_cost)]
+            if rich.size == 0:
+                continue
+            centroid = self.pos[gi].mean(0)
+            omega = self.depth[rich] / cfg.th.dV_max
+            mu = np.exp(-omega * cfg.th.dE_copy_max / cfg.th.kBT)
+            kids = mutate(self.G[rich], mu, cfg.mut_scale, self.rng)
+            self.Ns[rich] -= (cfg.repro_transfer + cfg.landauer_cost)
+            for j in range(rich.size):
+                gsz.append(kids[j])
+                gpos.append((centroid + cfg.child_scatter * self.rng.standard_normal(2)) % cfg.W)
+                gadh.append(self.adh[rich[j]] + cfg.mut_scale * mu[j] * self.rng.standard_normal())
+                gcl.append((self.clade[rich[j]] + cfg.clade_drift * self.rng.standard_normal()) % 1.0)
+                ggen.append(int(self.generation[rich[j]]) + 1)
+                gdep.append(cfg.th.dV_max * 0.9)
+        if not gsz:
+            return
+        nc = len(gsz)
+        self.G = np.concatenate([self.G, np.stack(gsz)], 0)
+        self.h = np.concatenate([self.h, np.zeros((nc, cfg.hidden))], 0)
+        self.pos = np.concatenate([self.pos, np.stack(gpos)], 0)
+        self.Ns = np.concatenate([self.Ns, np.full(nc, cfg.repro_transfer)])
+        self.depth = np.concatenate([self.depth, np.array(gdep)])
+        self.generation = np.concatenate([self.generation, np.array(ggen, dtype=int)])
+        self.adh = np.concatenate([self.adh, np.array(gadh)])
+        self.clade = np.concatenate([self.clade, np.array(gcl)])
 
     def _compact(self, alive):
         self.G = self.G[alive]; self.h = self.h[alive]; self.pos = self.pos[alive]
         self.Ns = self.Ns[alive]; self.depth = self.depth[alive]
         self.generation = self.generation[alive]
+        self.adh = self.adh[alive]; self.clade = self.clade[alive]
+        self.bonded = self.bonded[alive]
 
     def _reproduce(self, idx):
         cfg = self.cfg
@@ -179,12 +348,18 @@ class World:
         self.Ns[idx] -= (cfg.repro_transfer + cfg.landauer_cost)
         nc = idx.size
         childpos = (self.pos[idx] + cfg.child_scatter * self.rng.standard_normal((nc, 2))) % cfg.W
+        # adhesion inherited with the same thermally-forced error; clade tag drifts
+        child_adh = self.adh[idx] + cfg.mut_scale * mu * self.rng.standard_normal(nc)
+        child_clade = (self.clade[idx] + cfg.clade_drift * self.rng.standard_normal(nc)) % 1.0
         self.G = np.concatenate([self.G, children], 0)
         self.h = np.concatenate([self.h, np.zeros((nc, cfg.hidden))], 0)
         self.pos = np.concatenate([self.pos, childpos], 0)
         self.Ns = np.concatenate([self.Ns, np.full(nc, cfg.repro_transfer)])
         self.depth = np.concatenate([self.depth, np.full(nc, cfg.th.dV_max * 0.9)])
         self.generation = np.concatenate([self.generation, self.generation[idx] + 1])
+        self.adh = np.concatenate([self.adh, child_adh])
+        self.clade = np.concatenate([self.clade, child_clade])
+        self.bonded = np.concatenate([self.bonded, np.zeros(nc, dtype=bool)])
         if self.size > cfg.pop_cap:
             keep = self.rng.permutation(self.size)[: cfg.pop_cap]
             mask = np.zeros(self.size, dtype=bool); mask[keep] = True
@@ -198,8 +373,20 @@ class World:
                  field_total=self.producers.metrics()["prod_biomass"],
                  chemotaxis=chemo,
                  brain=float((self.h ** 2).mean()) if self.size else 0.0)
+        if self.size:
+            m["mean_adh"] = float((1.0 / (1.0 + np.exp(-self.adh))).mean())
+            m["max_org"] = int(self._last_org.max()) if self._last_org.size else 1
+            m["mean_org"] = float(self._last_org.mean()) if self._last_org.size else 1.0
         m.update(self.producers.metrics())
         return m
+
+    def buffering(self) -> Dict[str, float]:
+        """Cumulative starvation-death rate for bonded vs solitary cells. If pooling
+        buffers, bonded cells should starve at a LOWER rate than solitary ones."""
+        b = self._b_starved / self._b_alive if self._b_alive else float("nan")
+        s = self._s_starved / self._s_alive if self._s_alive else float("nan")
+        return dict(bonded_death=b, solitary_death=s,
+                    bonded_cell_ticks=self._b_alive, solitary_cell_ticks=self._s_alive)
 
 
 @dataclass

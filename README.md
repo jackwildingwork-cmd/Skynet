@@ -86,9 +86,10 @@ thermoevo/
   neuralnet.py     general recurrent controller (vector I/O) for the spatial world
   field.py         discrete, patchy, capped, replenishing resource field (m3)
   producers.py     autotrophs: couple a universal gradient (sunlight) -> vegetation
-  world.py         spatial foraging: herbivores graze producer biomass (m3/m4)
+  world.py         herbivores graze producer biomass; optional n-1 organisms (m3/4/5)
   world_experiment.py  the milestone-3 experiment
   trophic_experiment.py  the milestone-4 two-trophic-level experiment
+  multicell_experiment.py  the milestone-5 multicellularity (n-1 coordination) test
 run_milestone.py   prints the milestone-1 battery
 ```
 
@@ -237,30 +238,62 @@ tuned away: at the top the cycles slam into the extinction boundary and the
 herbivores crash out (the live artifact then lets a few **recolonise** the recovered
 crop, a rescue effect, so the cycle restarts).
 
-**Exploratory: n−1 coordination into multicellular organisms (artifact).** In the
-in-browser model, that boom-bust variance is the selection pressure behind a new
-layer. Herbivore cells carry an evolvable **adhesion** gene; adhesive same-clade
-cells **bond into organisms** that **pool structural stock** `N_s` (rich cells
-subsidise starving kin), so a bonded organism rides out a bust that would kill a
-lone cell — group-level CI/CII, coordination one level below the tier. It carries an
-overhead and crowds shared food, so whether it pays is left to selection; under
-heavy boom-bust the adhesion gene drifts **upward** (~0.54 → ~0.60 over a run) and
-organisms of tens–hundreds of cells form and dissolve with the cycles. This is a
-directional exploratory signal, not yet a statistically-validated Python result —
-the natural next step is to port adhesion/sharing into `world.py` and measure it
-with replicates the way the trophic results are gated.
+## Milestone 5: n−1 coordination — do multicellular organisms evolve?
+
+The boom-bust world is a variance-rich environment — the classic pressure for
+aggregation. Milestone 5 ports the n−1 coordination layer into the validated Python
+substrate (`world.py`, off unless `adhesion=True`) and asks, rigorously, whether
+multicellularity *pays*. Each herbivore cell carries an evolvable **adhesion** gene
+and a heritable **clade** tag; adhesive same-clade cells in adjacent locations
+**bond into an organism** (a connected neighbourhood, so members graze different
+cells) that **pools structural stock** `N_s` toward its mean — group-level
+homeostasis (CII). Optionally the organism reproduces as a **higher-level
+individual** (bonded cells forgo individual breeding; the organism buds offspring
+that stay together — Michod's fitness export). `python -m thermoevo.multicell_experiment`:
+
+**Organisms form; buffering is real but weak.** With adhesion on, organisms of
+tens-to-hundreds of cells appear and dissolve with the cycles. Pooling does buffer
+the death boundary — but only marginally and inconsistently (bonded starvation ≈
+91% of solitary, favoured in ~half the seeds): pooling lifts starving cells yet also
+drags rich ones toward the mean and charges an overhead, so the net edge is small.
+
+**Adhesion is not selected.** Tracked against a no-sharing drift control, the
+adhesion gene does **not** rise — if anything it drifts down:
+
+| condition | Δ(adhesion) over a run |
+|---|---|
+| sharing on, cell-level reproduction | −0.040 ± 0.046 |
+| no-sharing drift control | −0.020 ± 0.054 |
+| **group-level reproduction (fitness export)** | **−0.011 ± 0.029** |
+
+Pooling buffers death but suppresses the *surplus a cell needs to breed* — survival
+up, fecundity down, and the two ~cancel. Making the organism the unit of
+reproduction (fitness export) moves selection from clearly negative **toward
+neutral, but not to clearly positive.**
+
+**Honest verdict.** Multicellularity here is a viable, buffering **phenotype** — the
+larger individuals exist and hold together — but it is **not an evolutionary
+winner**. In RGC's terms the organisms **persist** (S) yet the coordination
+advantage does not clear the bar (χ): the transition is not made. A decisive one
+would need a group benefit a lone cell cannot obtain — division of labour,
+size-based predation resistance, a shared capability — which is *not* built. This is
+reported as found, not tuned toward a transition. (The in-browser artifact runs the
+same mechanism with a live adhesion readout; its earlier apparent upward drift was
+within this noise, as the replicated Python run now shows.)
 
 ## Next
 
-The environment is now a two-level ecology that can sit in stable coexistence or,
-under heavy grazing, in emergent boom-bust — the variance-rich substrate the tier
-transition needs. **n−1 / higher-level individuality** is now prototyped in the
-artifact (adhesion-bonded, stock-sharing organisms) and drifts in the right
-direction; the next concrete step is to **port it into `world.py` and validate it
-statistically** — measure whether the adhesion gene rises with replicates and
-whether bonded organisms satisfy the RGC dual criterion (persistence `S ≥ S*` and
-coordination efficiency `χ ≥ χ*`) against the boom-bust gradient, i.e. become a
-genuine tier-2 individual rather than a loose herd. Also open: producer-side
-evolution of defense (a real coevolutionary arms race), survival-critical coupling
-to surface a true extinction-catastrophe, and letting controller topology evolve so
-complexity can deepen.
+Milestone 5 gave a clear, honest negative: with only **stock-sharing** as the group
+benefit, multicellularity buffers but does not get selected — even with fitness
+export it only reaches neutral. The diagnosis points straight at the next step: the
+transition needs a **group benefit a lone cell cannot get**. Concretely — let bonded
+organisms do something a solitary cell can't: **division of labour** (some cells
+forage while others are shielded and only they breed — a germ/soma split),
+**size-based advantage** (a larger organism resists a mortality source, or reaches
+biomass a single cell can't), or a **shared capability** (pooled competence / a
+collective sensor that improves foraging χ). Add one of those and re-run the
+milestone-5 battery: the prediction is that adhesion crosses into positive selection
+and the RGC dual criterion (`S ≥ S*` ∧ `χ ≥ χ*`) is finally met — a genuine tier
+transition rather than a loose herd. Also still open: producer-side evolution of
+defense (a coevolutionary arms race), survival-critical coupling to surface a true
+extinction-catastrophe, and evolvable controller topology so complexity can deepen.

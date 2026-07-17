@@ -209,3 +209,32 @@ def test_two_levels_coexist_with_trophic_control():
     last = r.history[-1]
     assert last["prod_pop"] > 0                              # producers persist too
     assert last["prod_pop"] < 0.85 * ungrazed               # grazed down (top-down control)
+
+
+# --- n-1 coordination: multicellular organisms ------------------------------
+
+def test_adhesion_layer_is_off_by_default_and_inert():
+    """The multicellularity layer must not perturb the validated core when off."""
+    from thermoevo.world import WorldConfig, run
+    a = run(WorldConfig(seed=1, ticks=1200, probe_interval=400))
+    b = run(WorldConfig(seed=1, ticks=1200, probe_interval=400, adhesion=False))
+    assert a.final_pop == b.final_pop                        # identical trajectories
+
+def test_organisms_form_and_pool_buffers_death():
+    """With adhesion on, bonded cells form organisms and — because they pool
+    structural stock — starve at a lower rate than solitary cells."""
+    from thermoevo.producers import ProducerConfig
+    from thermoevo.world import WorldConfig, World
+    pc = ProducerConfig(seed=0, graze_max_frac=0.9)          # boom-bust: variance to buffer
+    w = World(WorldConfig(seed=0, ticks=1500, producers=pc, max_intake=13.0, adhesion=True))
+    saw_org = False
+    for t in range(1, 1501):
+        w.step(t)
+        if w.size == 0:
+            break
+        if w.metrics().get("max_org", 1) >= 2:
+            saw_org = True
+    assert saw_org                                           # multicellular organisms appear
+    b = w.buffering()
+    assert b["bonded_cell_ticks"] > 0 and b["solitary_cell_ticks"] > 0
+    assert b["bonded_death"] < b["solitary_death"]           # pooling buffers the boundary
