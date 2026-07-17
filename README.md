@@ -221,13 +221,46 @@ inside a single tier: producers → consumers. `tests/test_thermo.py` gates it
 (producers persist on a universal gradient; the two levels coexist with the
 producers grazed materially below their ungrazed crop). 16 tests pass.
 
+**Turn up grazing and coexistence gives way to boom-bust.** The stable crop is not
+the only regime. As grazing efficiency rises, the equilibrium **destabilises** — not
+gradually into a lower steady state, but into predator–prey **limit cycles** of
+growing amplitude (herbivore population CV over t>800):
+
+| graze fraction / intake | 0.55 / 8 | 0.70 / 10 | 0.85 / 12 | 0.92 / 13 |
+|---|---|---|---|---|
+| herbivore CV | 0.02 | 0.08 | 0.28–0.60 | 0.15–1.09, some extinct |
+| regime | stable coexistence | mild oscillation | strong boom–bust | violent cycles → collapse |
+
+A **Rosenzweig–MacArthur / paradox-of-enrichment** transition, unforced — it falls
+straight out of the spatial substrate. Boom-bust is reported as real ecology, not
+tuned away: at the top the cycles slam into the extinction boundary and the
+herbivores crash out (the live artifact then lets a few **recolonise** the recovered
+crop, a rescue effect, so the cycle restarts).
+
+**Exploratory: n−1 coordination into multicellular organisms (artifact).** In the
+in-browser model, that boom-bust variance is the selection pressure behind a new
+layer. Herbivore cells carry an evolvable **adhesion** gene; adhesive same-clade
+cells **bond into organisms** that **pool structural stock** `N_s` (rich cells
+subsidise starving kin), so a bonded organism rides out a bust that would kill a
+lone cell — group-level CI/CII, coordination one level below the tier. It carries an
+overhead and crowds shared food, so whether it pays is left to selection; under
+heavy boom-bust the adhesion gene drifts **upward** (~0.54 → ~0.60 over a run) and
+organisms of tens–hundreds of cells form and dissolve with the cycles. This is a
+directional exploratory signal, not yet a statistically-validated Python result —
+the natural next step is to port adhesion/sharing into `world.py` and measure it
+with replicates the way the trophic results are gated.
+
 ## Next
 
-The environment is now a stable two-level ecology, which is the substrate the
-tier transition needs. Deferred and next: **n−1 / higher-level individuality** —
-let a cooperating family of tier-1 processors satisfy CI/CII/CIII against a *new*
-gradient class and become a single tier-2 processor (multicellularity), using the
-RGC dual criterion (persistence `S ≥ S*` and coordination efficiency `χ ≥ χ*`).
-Also open: producer-side evolution of defense (a real coevolutionary arms race),
-survival-critical coupling to surface a true extinction-catastrophe, and letting
-controller topology evolve so complexity can deepen.
+The environment is now a two-level ecology that can sit in stable coexistence or,
+under heavy grazing, in emergent boom-bust — the variance-rich substrate the tier
+transition needs. **n−1 / higher-level individuality** is now prototyped in the
+artifact (adhesion-bonded, stock-sharing organisms) and drifts in the right
+direction; the next concrete step is to **port it into `world.py` and validate it
+statistically** — measure whether the adhesion gene rises with replicates and
+whether bonded organisms satisfy the RGC dual criterion (persistence `S ≥ S*` and
+coordination efficiency `χ ≥ χ*`) against the boom-bust gradient, i.e. become a
+genuine tier-2 individual rather than a loose herd. Also open: producer-side
+evolution of defense (a real coevolutionary arms race), survival-critical coupling
+to surface a true extinction-catastrophe, and letting controller topology evolve so
+complexity can deepen.

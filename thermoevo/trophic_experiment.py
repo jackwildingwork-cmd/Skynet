@@ -19,6 +19,13 @@ Three questions, each measured:
      grazing (top-down control) while herbivores are held at a carrying capacity set
      by producer productivity (bottom-up) — and whether both persist indefinitely.
 
+  4. What happens when grazing gets heavy? The stable crop is not the only regime.
+     Turning up grazing efficiency destabilises the equilibrium into predator-prey
+     limit cycles (boom-bust) of growing amplitude, and finally into cycles that
+     crash to extinction — a Rosenzweig-MacArthur / paradox-of-enrichment transition
+     that falls straight out of the substrate. Reported, not tuned away: boom-bust is
+     real ecology, not a bug.
+
   3. Does the gradient's structure decide whether intelligence evolves? This is the
      sharp prediction: the SAME thermodynamic process, facing a universal gradient
      (producers) vs a patchy one (herbivores), should be pushed toward foraging
@@ -112,12 +119,43 @@ def intelligence_tracks_the_gradient(seeds: int = 3, ticks: int = 3000):
     print("       environment's structure, not the organism, decides if a mind pays.")
 
 
+def grazing_pressure_transition(seeds: int = 4, ticks: int = 4000):
+    print("\n=== 4. Turn up grazing: coexistence -> boom-bust -> collapse (emergent) ===")
+    print("    Heavier grazing does not just lower the standing crop; it DESTABILISES the")
+    print("    equilibrium. Herbivore population CV (over t>800) measures the amplitude of")
+    print("    the predator-prey cycle; at the top it hits the extinction boundary.")
+    print(f"    {'graze_frac':>10} {'intake':>6}   outcome per seed (CV = cycle amplitude)")
+    for gmax, intake in ((0.55, 8.0), (0.70, 10.0), (0.85, 12.0), (0.92, 13.0)):
+        outs = []
+        for s in range(seeds):
+            pc = ProducerConfig(seed=s, graze_max_frac=gmax)
+            w = World(WorldConfig(seed=s, ticks=ticks, producers=pc, max_intake=intake))
+            hs, dead = [], False
+            for t in range(1, ticks + 1):
+                w.step(t)
+                if w.size == 0:
+                    dead = True; break
+                if t > 800:
+                    hs.append(w.size)
+            if dead:
+                outs.append("extinct")
+            else:
+                cv = statistics.pstdev(hs) / max(1e-9, statistics.mean(hs))
+                outs.append(f"CV={cv:.2f}")
+        print(f"    {gmax:>10} {intake:>6}   {outs}")
+    print("    -> a Rosenzweig-MacArthur / paradox-of-enrichment transition, unforced: the")
+    print("       stable coexistence equilibrium gives way to limit cycles of growing")
+    print("       amplitude, then to cycles that crash into extinction. Boom-bust is not a")
+    print("       failure mode here — it is what the substrate does under heavy predation.")
+
+
 def main():
     print("thermoevo — Milestone 4: two trophic levels in one tier\n"
           "(universal-gradient producers -> patchy-gradient herbivores)\n")
     producers_alone()
     coexistence()
     intelligence_tracks_the_gradient()
+    grazing_pressure_transition()
 
 
 if __name__ == "__main__":
