@@ -81,6 +81,28 @@ class WorldConfig:
     org_repro_thr: float = 60.0      # ... and this much pooled N_s
     org_propagule: int = 3           # cells released per budding event
     org_propagule_cost: float = 26.0 # N_s levied across the organism to bud
+    # third trophic level: predators that hunt herbivores. Their gradient is the
+    # herbivore population itself — mobile prey that must be chased and caught (a
+    # harder foraging problem than grazing). init_predators=0 -> no predators, the
+    # two-level world is unchanged.
+    init_predators: int = 0
+    pred_hidden: int = 5
+    pred_init_scale: float = 0.5
+    pred_max_step: float = 1.9       # faster than herbivores (max_step 1.5): chase
+    pred_max_intake: float = 25.0
+    pred_occupancy: float = 0.3
+    pred_move_cost: float = 0.4
+    pred_homeostasis: float = 0.4
+    pred_gamma_n: float = 0.05
+    pred_repro_threshold: float = 32.0
+    pred_repro_transfer: float = 14.0
+    pred_landauer_cost: float = 2.0
+    pred_child_scatter: float = 2.0
+    pred_pop_cap: int = 1500
+    catch_frac: float = 0.50         # max fraction of a cell's prey biomass caught/tick
+    catch_efficiency: float = 0.9    # killed prey biomass -> predator structural stock
+    prey_diffuse: float = 0.20       # spread herbivore biomass into a climbable field
+    prey_sense_cap: float = 40.0
     # run
     ticks: int = 4000
     probe_interval: int = 200
@@ -126,6 +148,25 @@ class World:
         self._last_org = np.array([], dtype=int)              # organism sizes this tick
         # cumulative buffering accounting (starvation deaths, bonded vs solitary)
         self._b_alive = 0; self._b_starved = 0; self._s_alive = 0; self._s_starved = 0
+        # --- third trophic level: predators hunting herbivores ------------------
+        self._pred_chemo = []
+        self._pred_kills = 0
+        m = cfg.init_predators
+        if m > 0:
+            self.pnet = NetSpec(IN_DIM, cfg.pred_hidden, OUT_DIM)
+            self.Gp = self.pnet.random(m, cfg.pred_init_scale, self.rng)
+            self.hp = np.zeros((m, cfg.pred_hidden))
+            # start predators where the prey are (on the herbivore founders)
+            pick = self.rng.integers(0, self.size, size=m)
+            self.pos_p = (self.pos[pick] + self.rng.standard_normal((m, 2))) % cfg.W
+            self.Ns_p = np.full(m, cfg.pred_repro_threshold * 0.6)
+            self.depth_p = np.full(m, cfg.th.dV_max)
+            self.gen_p = np.ones(m, dtype=int)
+        else:
+            self.pnet = None
+            self.Gp = np.zeros((0, 0)); self.hp = np.zeros((0, cfg.pred_hidden))
+            self.pos_p = np.zeros((0, 2)); self.Ns_p = np.zeros(0)
+            self.depth_p = np.zeros(0); self.gen_p = np.zeros(0, dtype=int)
 
     @property
     def size(self) -> int:
@@ -201,7 +242,12 @@ class World:
         p_escape = 1.0 - np.exp(-cfg.th.omega0 * np.exp(-self.depth / cfg.th.kBT) * cfg.dt)
         escaped = self.rng.random(self.size) < p_escape
 
-        alive = (self.Ns > 0.0) & (~escaped)
+        # --- level 3: predators hunt the herbivores (a mobile, fleeing gradient) --
+        predated = np.zeros(self.size, dtype=bool)
+        if self.pnet is not None and self.Ns_p.size:
+            predated = self._predators_step(nix, niy)
+
+        alive = (self.Ns > 0.0) & (~escaped) & (~predated)
         if cfg.adhesion:
             # attribute starvation (N_s boundary) deaths to bonded vs solitary cells
             starved = self.Ns <= 0.0
@@ -216,6 +262,95 @@ class World:
         idx = np.nonzero(can)[0]
         if idx.size:
             self._reproduce(idx)
+
+    @property
+    def pred_size(self) -> int:
+        return self.Ns_p.shape[0]
+
+    def _predators_step(self, hix, hiy):
+        """The third trophic level. Predators sense a herbivore-density field (prey
+        biomass rasterised + diffused into a climbable gradient), their evolved
+        controller chooses a move (they are faster than herbivores — a chase), and
+        they catch prey in their cell: up to catch_frac of the cell's herbivore
+        biomass, limited by predator demand, killing those herbivores and converting
+        the kill into predator structural stock. Same core (N_s, Omega, forced-error
+        reproduction). Returns the boolean mask of herbivores killed this tick."""
+        cfg = self.cfg; W = cfg.W; N2 = W * W
+        hflat = hix * W + hiy
+        praw = np.zeros(N2); np.add.at(praw, hflat, self.Ns)          # prey biomass per cell
+        prey = praw.reshape(W, W)
+        if cfg.prey_diffuse > 0:
+            lap = (np.roll(prey, 1, 0) + np.roll(prey, -1, 0) +
+                   np.roll(prey, 1, 1) + np.roll(prey, -1, 1) - 4.0 * prey)
+            prey = prey + cfg.prey_diffuse * lap
+        pix, piy = self._cells(self.pos_p)
+        here, gx, gy = self._sense(prey, pix, piy)
+        hunger = np.clip(1.0 - self.Ns_p / cfg.pred_repro_threshold, 0.0, 1.0)
+        xp = np.stack([here / cfg.prey_sense_cap, gx, gy, hunger], axis=1)
+        outp, self.hp = self.pnet.step(self.Gp, self.hp, xp)
+        movep = cfg.pred_max_step * np.tanh(outp)
+        slen = np.linalg.norm(movep, axis=1)
+        grad = np.stack([gx, gy], axis=1); gn = np.linalg.norm(grad, axis=1)
+        good = (gn > 1e-6) & (slen > 1e-6)
+        if good.any():                                                # hunting intelligence
+            self._pred_chemo.append(float(((movep[good] * grad[good]).sum(1) /
+                                           (slen[good] * gn[good])).mean()))
+        self.pos_p = (self.pos_p + movep) % W
+        ppix, ppiy = self._cells(self.pos_p)
+        pflat = ppix * W + ppiy
+        m = self.pred_size
+        demand = np.full(m, cfg.pred_max_intake)
+        hcell = np.zeros(N2); np.add.at(hcell, hflat, self.Ns)
+        pdem = np.zeros(N2); np.add.at(pdem, pflat, demand)
+        caught_cell = np.minimum(cfg.catch_frac * hcell, pdem)        # biomass taken per cell
+        pkill = np.where(hcell > 0.0, caught_cell / np.maximum(hcell, 1e-9), 0.0)
+        predated = self.rng.random(self.size) < pkill[hflat]          # which herbivores die
+        killed_cell = np.zeros(N2); np.add.at(killed_cell, hflat[predated], self.Ns[predated])
+        share = np.where(pdem[pflat] > 0.0, demand / pdem[pflat], 0.0)
+        intake_p = killed_cell[pflat] * share * cfg.catch_efficiency
+        self._pred_kills += int(predated.sum())
+        # predator energetics + Kramers death + reproduction
+        move_cost = cfg.pred_move_cost * slen
+        F = intake_p - cfg.pred_occupancy - move_cost - cfg.pred_homeostasis
+        noise = np.sqrt(2.0 * cfg.pred_gamma_n * cfg.th.kBT * cfg.dt) * self.rng.standard_normal(m)
+        self.Ns_p = self.Ns_p + (F - cfg.pred_gamma_n * self.Ns_p) * cfg.dt + noise
+        damage = cfg.th.damage_rate * cfg.th.dV_max * cfg.dt
+        repair = cfg.th.repair_gain * cfg.pred_homeostasis * cfg.dt
+        self.depth_p = np.clip(self.depth_p - damage + repair, 0.0, cfg.th.dV_max)
+        p_esc = 1.0 - np.exp(-cfg.th.omega0 * np.exp(-self.depth_p / cfg.th.kBT) * cfg.dt)
+        palive = (self.Ns_p > 0.0) & (self.rng.random(m) >= p_esc)
+        self._compact_pred(palive)
+        if self.pred_size:
+            pcan = ((self.Ns_p > cfg.pred_repro_threshold) &
+                    (self.Ns_p > cfg.pred_repro_transfer + cfg.pred_landauer_cost))
+            pidx = np.nonzero(pcan)[0]
+            if pidx.size:
+                self._reproduce_pred(pidx)
+        return predated
+
+    def _compact_pred(self, alive):
+        self.Gp = self.Gp[alive]; self.hp = self.hp[alive]; self.pos_p = self.pos_p[alive]
+        self.Ns_p = self.Ns_p[alive]; self.depth_p = self.depth_p[alive]
+        self.gen_p = self.gen_p[alive]
+
+    def _reproduce_pred(self, idx):
+        cfg = self.cfg
+        omega = self.depth_p[idx] / cfg.th.dV_max
+        mu = np.exp(-omega * cfg.th.dE_copy_max / cfg.th.kBT)
+        children = mutate(self.Gp[idx], mu, cfg.mut_scale, self.rng)
+        self.Ns_p[idx] -= (cfg.pred_repro_transfer + cfg.pred_landauer_cost)
+        nc = idx.size
+        childpos = (self.pos_p[idx] + cfg.pred_child_scatter * self.rng.standard_normal((nc, 2))) % cfg.W
+        self.Gp = np.concatenate([self.Gp, children], 0)
+        self.hp = np.concatenate([self.hp, np.zeros((nc, cfg.pred_hidden))], 0)
+        self.pos_p = np.concatenate([self.pos_p, childpos], 0)
+        self.Ns_p = np.concatenate([self.Ns_p, np.full(nc, cfg.pred_repro_transfer)])
+        self.depth_p = np.concatenate([self.depth_p, np.full(nc, cfg.th.dV_max * 0.9)])
+        self.gen_p = np.concatenate([self.gen_p, self.gen_p[idx] + 1])
+        if self.pred_size > cfg.pred_pop_cap:
+            keep = self.rng.permutation(self.pred_size)[: cfg.pred_pop_cap]
+            mask = np.zeros(self.pred_size, dtype=bool); mask[keep] = True
+            self._compact_pred(mask)
 
     def _cohere(self):
         """Pull each cell toward the centroid of same-clade cells in its 3x3
@@ -377,6 +512,11 @@ class World:
             m["mean_adh"] = float((1.0 / (1.0 + np.exp(-self.adh))).mean())
             m["max_org"] = int(self._last_org.max()) if self._last_org.size else 1
             m["mean_org"] = float(self._last_org.mean()) if self._last_org.size else 1.0
+        if self.pnet is not None:
+            pc = float(np.mean(self._pred_chemo[-2000:])) if self._pred_chemo else float("nan")
+            m["pred_pop"] = self.pred_size
+            m["pred_chemo"] = pc
+            m["pred_gen"] = float(self.gen_p.mean()) if self.pred_size else 0.0
         m.update(self.producers.metrics())
         return m
 
@@ -407,5 +547,5 @@ def run(cfg: WorldConfig) -> WorldResult:
             ended = "extinct"; history.append(dict(t=t, pop=0, **w.producers.metrics())); break
         if t % cfg.probe_interval == 0:
             history.append(dict(t=t, **w.metrics()))
-            w._chemo.clear()
+            w._chemo.clear(); w._pred_chemo.clear()
     return WorldResult(history=history, final_pop=w.size, ended=ended, cfg=cfg)

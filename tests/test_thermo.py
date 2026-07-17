@@ -238,3 +238,35 @@ def test_organisms_form_and_pool_buffers_death():
     b = w.buffering()
     assert b["bonded_cell_ticks"] > 0 and b["solitary_cell_ticks"] > 0
     assert b["bonded_death"] < b["solitary_death"]           # pooling buffers the boundary
+
+
+# --- third trophic level: predators -----------------------------------------
+
+def test_predators_off_by_default():
+    """init_predators=0 -> no predator level, metrics carry no predator keys."""
+    from thermoevo.world import WorldConfig, run
+    r = run(WorldConfig(seed=0, ticks=800, probe_interval=400))
+    assert "pred_pop" not in r.history[-1]
+
+def test_predators_establish_and_hunting_evolves():
+    """Predators establish on the herbivores and evolve prey-gradient chemotaxis
+    (hunting intelligence) well above the random-founder baseline."""
+    from thermoevo.world import WorldConfig, World
+    w = World(WorldConfig(seed=2, ticks=10, init_predators=150))
+    for t in range(1, 40):                                   # random-founder hunting baseline
+        w.step(t)
+        if w.size == 0 or w.pred_size == 0:
+            break
+    base = float(np.mean(w._pred_chemo)) if w._pred_chemo else 0.0
+    w2 = World(WorldConfig(seed=2, ticks=3000, init_predators=150))
+    peak_hunt, peak_pred = -1.0, 0
+    for t in range(1, 3001):
+        w2.step(t)
+        if w2.size == 0:
+            break
+        peak_pred = max(peak_pred, w2.pred_size)
+        if len(w2._pred_chemo) > 500:
+            peak_hunt = max(peak_hunt, float(np.mean(w2._pred_chemo[-500:])))
+            w2._pred_chemo.clear()
+    assert peak_pred > 150                                   # predators reproduced (a real population)
+    assert peak_hunt > base + 0.2                            # hunting intelligence evolved

@@ -86,10 +86,11 @@ thermoevo/
   neuralnet.py     general recurrent controller (vector I/O) for the spatial world
   field.py         discrete, patchy, capped, replenishing resource field (m3)
   producers.py     autotrophs: couple a universal gradient (sunlight) -> vegetation
-  world.py         herbivores graze producer biomass; optional n-1 organisms (m3/4/5)
+  world.py         herbivores graze producers; optional n-1 organisms + predators
   world_experiment.py  the milestone-3 experiment
   trophic_experiment.py  the milestone-4 two-trophic-level experiment
   multicell_experiment.py  the milestone-5 multicellularity (n-1 coordination) test
+  predator_experiment.py  the milestone-6 third-trophic-level (predator) experiment
 run_milestone.py   prints the milestone-1 battery
 ```
 
@@ -281,6 +282,38 @@ reported as found, not tuned toward a transition. (The in-browser artifact runs 
 same mechanism with a live adhesion readout; its earlier apparent upward drift was
 within this noise, as the replicated Python run now shows.)
 
+## Milestone 6: a third trophic level — predators
+
+sunlight → producers → herbivores → **predators**. The predators' gradient is the
+herbivore population itself: mobile prey that *flees* and must be chased and caught —
+a harder foraging problem than grazing a (near-stationary) vegetation field.
+Predators are the same validated core (N_s Langevin + absorbing boundary, Ω Kramers
+wells, forced-error reproduction); only the gradient is new. `init_predators=0`
+recovers the two-level world exactly. `python -m thermoevo.predator_experiment`:
+
+**Hunting intelligence evolves.** Predators climb the prey-density gradient far
+better than random founders — the herbivores' foraging trick, one level up:
+
+| | random founders | evolved |
+|---|---|---|
+| prey-gradient chemotaxis (hunt χ) | 0.14 | **0.76** |
+
+**A three-level trophic cascade falls out.** Adding the top level does not just add a
+population — it reaches *down two levels*. Predators thin the herbivores, which
+releases the producers:
+
+| | no predators | with predators |
+|---|---|---|
+| producer standing crop | 1508 | **3624** (≈2.4×) |
+
+**Predators overshoot and sometimes collapse.** Three coupled levels give
+predator–prey limit cycles: predators boom, crash the herbivores to single digits,
+and in ~1 seed in 5 the predators overhunt and starve out entirely (the herbivores
+recover from spatial refugia). Persisted in 4/5 seeds; boom-bust and top-predator
+collapse are emergent, reported as found. `tests/test_thermo.py` gates it (predators
+off by default; predators establish and hunting evolves above the random baseline).
+20 tests pass.
+
 ## Next
 
 Milestone 5 gave a clear, honest negative: with only **stock-sharing** as the group
@@ -294,6 +327,13 @@ biomass a single cell can't), or a **shared capability** (pooled competence / a
 collective sensor that improves foraging χ). Add one of those and re-run the
 milestone-5 battery: the prediction is that adhesion crosses into positive selection
 and the RGC dual criterion (`S ≥ S*` ∧ `χ ≥ χ*`) is finally met — a genuine tier
-transition rather than a loose herd. Also still open: producer-side evolution of
-defense (a coevolutionary arms race), survival-critical coupling to surface a true
-extinction-catastrophe, and evolvable controller topology so complexity can deepen.
+transition rather than a loose herd.
+
+The predators (milestone 6) open their own next steps. The strongest is
+**predator–prey coevolution**: give the herbivores a predator-danger sense so
+*flight* can evolve, turning the one-sided hunt into an arms race (vigilance vs
+stealth) — the same knob that could also be the group benefit multicellularity
+needs (a herd that senses and flees together). Also still open: producer-side
+evolution of defense (a coevolutionary arms race one level down),
+survival-critical coupling to surface a true extinction-catastrophe, and evolvable
+controller topology so complexity can deepen.
