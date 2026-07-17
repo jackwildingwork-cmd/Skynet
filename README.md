@@ -84,9 +84,11 @@ thermoevo/
   evolve.py        milestone-2 engine (well-mixed shared gradient, branching)
   evo_experiment.py  the milestone-2 sweeps
   neuralnet.py     general recurrent controller (vector I/O) for the spatial world
-  field.py         discrete, patchy, capped, replenishing resource field
-  world.py         milestone-3 spatial foraging evolution
+  field.py         discrete, patchy, capped, replenishing resource field (m3)
+  producers.py     autotrophs: couple a universal gradient (sunlight) -> vegetation
+  world.py         spatial foraging: herbivores graze producer biomass (m3/m4)
   world_experiment.py  the milestone-3 experiment
+  trophic_experiment.py  the milestone-4 two-trophic-level experiment
 run_milestone.py   prints the milestone-1 battery
 ```
 
@@ -175,10 +177,57 @@ built in and did not appear. Effect sizes here are large and clean — the spati
 "finding" structure gives selection a much stronger handle than the well-mixed
 model did.
 
+## Milestone 4: two trophic levels in one tier
+
+The environment gets bigger. Until now the gradient the foragers ate was *given* —
+an abstract logistic field. Now it is **produced**. A population of **autotroph
+processes** (`producers.py`) couples to a **universal gradient** — sunlight,
+available to every producer at every cell — and fixes it into **standing structural
+stock**: the vegetation. The old foragers become **herbivores** (`world.py`): they
+cannot touch sunlight, so their gradient is the producers' biomass, which is patchy
+and mobile and must be **found**. Both levels are the same validated core (N_s
+Langevin + absorbing boundary, Ω Kramers wells, forced-error reproduction); the
+environment, not the code, makes them differ. `python -m thermoevo.trophic_experiment`:
+
+**A universal gradient still has a finite carrying capacity.** Sunlight is
+everywhere, so there is no finding problem — yet producers do not blow up. Two
+brakes bound them: **self-shading** (neighbours split the light, a Beer–Lambert
+share `b_i/(k+B_local)`) and **recruitment limitation** (a seed establishes only on
+a safe, un-shaded site). Together they turn an unbounded gradient into a stable
+standing crop (crop CV over the last 200 ticks ≈ 0.00). "Unlocking is not
+accessing": the flux is universal, the *accessible* flux per coupler is finite.
+
+**The two levels coexist — top-down and bottom-up at once.** Add herbivores and
+neither collapses. Grazing holds producers **~66% below** their ungrazed crop
+(top-down control), while herbivores settle at a carrying capacity set by producer
+productivity (bottom-up, ~900 on the default field), every individual dying while
+both classes persist. A stable ecology, not a boom–bust cycle, across seeds.
+
+**Intelligence is selected by the gradient's structure, not the organism.** This is
+the sharp result. The *same* process, facing a *universal* gradient (producers),
+evolves no foraging skill — there is nothing to climb. Facing a *patchy* gradient
+(herbivores), it evolves gradient-climbing chemotaxis from a random baseline
+**~0.03 → ~0.62**. A mind pays exactly when the free energy must be found:
+
+| | producers | herbivores |
+|---|---|---|
+| gradient | sunlight (universal) | producer biomass (patchy) |
+| finding problem | none | must locate clumps |
+| bound by | self-shading + safe sites | food supply (grazing) |
+| evolved foraging χ | — (n/a) | 0.03 → 0.62 |
+
+This is RGC's "structural stock **is** a gradient for the next consumer", realised
+inside a single tier: producers → consumers. `tests/test_thermo.py` gates it
+(producers persist on a universal gradient; the two levels coexist with the
+producers grazed materially below their ungrazed crop). 16 tests pass.
+
 ## Next
 
-Surface the extinction-catastrophe (sparser/again, or survival-critical coupling);
-add moving or seasonally-appearing patches so temporal prediction (not just
-spatial gradient-climbing) is rewarded; let controller size/topology evolve so
-complexity can deepen; and add a mechanism where cooperation could pay, to see
-whether it emerges.
+The environment is now a stable two-level ecology, which is the substrate the
+tier transition needs. Deferred and next: **n−1 / higher-level individuality** —
+let a cooperating family of tier-1 processors satisfy CI/CII/CIII against a *new*
+gradient class and become a single tier-2 processor (multicellularity), using the
+RGC dual criterion (persistence `S ≥ S*` and coordination efficiency `χ ≥ χ*`).
+Also open: producer-side evolution of defense (a real coevolutionary arms race),
+survival-critical coupling to surface a true extinction-catastrophe, and letting
+controller topology evolve so complexity can deepen.

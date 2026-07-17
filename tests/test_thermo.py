@@ -172,3 +172,40 @@ def test_foraging_intelligence_evolves_above_random():
     ev = [h["chemotaxis"] for h in r.history if "chemotaxis" in h]
     evolved = statistics.mean(ev[-3:])
     assert evolved > base + 0.1                               # gradient-climbing evolves
+
+
+# --- two trophic levels in one tier -----------------------------------------
+
+def test_producers_persist_on_universal_gradient():
+    """Autotrophs couple to a universal gradient (sunlight everywhere) and reach a
+    stable, bounded standing crop — bounded by self-shading + recruitment limitation,
+    not by having to find the gradient."""
+    from thermoevo.producers import Producers, ProducerConfig
+    rng = np.random.default_rng(0)
+    p = Producers(ProducerConfig(seed=0), rng)
+    crop = []
+    for t in range(700):
+        p.step()
+        if t >= 500:
+            crop.append(p.size)
+    assert p.size > 0                                         # producers persist
+    mean = statistics.mean(crop)
+    assert 0 < mean < ProducerConfig().pop_cap               # carrying capacity, cap non-binding
+    assert statistics.pstdev(crop) / mean < 0.05             # stable standing crop
+
+
+def test_two_levels_coexist_with_trophic_control():
+    """Herbivores forage producer-made vegetation; both persist, and grazing holds
+    producers materially below their ungrazed crop (top-down control)."""
+    from thermoevo.producers import Producers, ProducerConfig
+    from thermoevo.world import WorldConfig, run
+    rng = np.random.default_rng(0)
+    p = Producers(ProducerConfig(seed=0), rng)
+    for _ in range(600):
+        p.step()
+    ungrazed = p.size
+    r = run(WorldConfig(seed=0, ticks=2500, probe_interval=500))
+    assert r.ended == "completed" and r.final_pop > 0        # herbivores persist
+    last = r.history[-1]
+    assert last["prod_pop"] > 0                              # producers persist too
+    assert last["prod_pop"] < 0.85 * ungrazed               # grazed down (top-down control)
