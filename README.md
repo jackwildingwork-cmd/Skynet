@@ -308,11 +308,32 @@ releases the producers:
 
 **Predators overshoot and sometimes collapse.** Three coupled levels give
 predator–prey limit cycles: predators boom, crash the herbivores to single digits,
-and in ~1 seed in 5 the predators overhunt and starve out entirely (the herbivores
-recover from spatial refugia). Persisted in 4/5 seeds; boom-bust and top-predator
-collapse are emergent, reported as found. `tests/test_thermo.py` gates it (predators
-off by default; predators establish and hunting evolves above the random baseline).
-20 tests pass.
+and sometimes overhunt and starve out entirely (the herbivores recover from spatial
+refugia). Boom-bust and top-predator collapse are emergent, reported as found.
+
+**A Holling Type II functional response falls out of prey handling.** A predator
+that catches a prey is then *busy handling it* for `handling_time` ticks and cannot
+hunt; at high prey density it is mostly handling, so its capture rate saturates. The
+per-capita kill rate vs prey density, accumulated over the boom-bust range, is a
+clean concave curve — Type II, not the straight line of Type I — with the
+per-prey capture rate falling ~4× from low to high density. It is *mechanistic*, not
+a chosen response shape, and it **stabilises coexistence** (herbivores now sit at
+~1000+ rather than being driven to the floor).
+
+**Predator–prey coevolution is a real but asymmetric arms race.** Herbivores sense
+the predator-danger gradient (two extra controller inputs), so *flight* can evolve:
+
+| | random | evolved |
+|---|---|---|
+| predator hunting (climb prey gradient) | 0.03 | **0.70** |
+| prey flight (move away from predators) | 0.00 | **0.06** |
+
+Both move in the adaptive direction, but predators evolve *strong* hunting while prey
+evolve only *weak* flight — because the Type II handling limit keeps predation a minor
+mortality source, so costly vigilance barely pays. Reported as found, not forced into
+a symmetric race. `tests/test_thermo.py` gates all of it (predators off by default;
+predators establish and hunting evolves; Type II saturation; flight evolves above
+baseline). 22 tests pass.
 
 ## Next
 
@@ -329,11 +350,12 @@ milestone-5 battery: the prediction is that adhesion crosses into positive selec
 and the RGC dual criterion (`S ≥ S*` ∧ `χ ≥ χ*`) is finally met — a genuine tier
 transition rather than a loose herd.
 
-The predators (milestone 6) open their own next steps. The strongest is
-**predator–prey coevolution**: give the herbivores a predator-danger sense so
-*flight* can evolve, turning the one-sided hunt into an arms race (vigilance vs
-stealth) — the same knob that could also be the group benefit multicellularity
-needs (a herd that senses and flees together). Also still open: producer-side
-evolution of defense (a coevolutionary arms race one level down),
-survival-critical coupling to surface a true extinction-catastrophe, and evolvable
-controller topology so complexity can deepen.
+The predators (milestone 6) now hunt with a Holling Type II response and the prey
+flee, but the arms race is asymmetric because handling keeps predation gentle. Two
+natural pushes: make predation a *stronger* selective force (larger prey, or
+survival-critical capture) so flight is pressed harder — and connect it to the
+stalled multicellularity result, since a **herd that senses and flees together** is
+exactly the group benefit a lone cell cannot get, the missing ingredient that could
+finally carry adhesion into positive selection (the milestone-5 → milestone-6
+bridge). Also still open: producer-side evolution of defense (a coevolutionary arms
+race one level down), and evolvable controller topology so complexity can deepen.

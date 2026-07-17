@@ -90,7 +90,7 @@ class WorldConfig:
     pred_init_scale: float = 0.5
     pred_max_step: float = 1.9       # faster than herbivores (max_step 1.5): chase
     pred_max_intake: float = 25.0
-    pred_occupancy: float = 0.3
+    pred_occupancy: float = 0.2
     pred_move_cost: float = 0.4
     pred_homeostasis: float = 0.4
     pred_gamma_n: float = 0.05
@@ -99,10 +99,20 @@ class WorldConfig:
     pred_landauer_cost: float = 2.0
     pred_child_scatter: float = 2.0
     pred_pop_cap: int = 1500
-    catch_frac: float = 0.50         # max fraction of a cell's prey biomass caught/tick
-    catch_efficiency: float = 0.9    # killed prey biomass -> predator structural stock
+    catch_efficiency: float = 1.0    # killed prey biomass -> predator structural stock
     prey_diffuse: float = 0.20       # spread herbivore biomass into a climbable field
     prey_sense_cap: float = 40.0
+    # prey handling -> Holling Type II falls out mechanistically. A predator that
+    # catches a prey is BUSY processing it for handling_time ticks and cannot hunt;
+    # at high prey density it spends most of its time handling, so its capture rate
+    # saturates (Type II) instead of rising forever (Type I). attack_rate sets the
+    # per-tick encounter probability while searching (scales with local prey count).
+    attack_rate: float = 0.75
+    handling_time: float = 4.0
+    # coevolution: herbivores sense the local predator-density gradient (2 extra
+    # controller inputs) so that FLIGHT can evolve. pred_danger scales that input.
+    pred_diffuse: float = 0.25
+    pred_danger: float = 0.15
     # run
     ticks: int = 4000
     probe_interval: int = 200
@@ -114,7 +124,10 @@ class WorldConfig:
             self.producers.W = self.W
 
 
-IN_DIM, OUT_DIM = 4, 2   # sense [veg_here, grad_x, grad_y, hunger] -> move [vx, vy]
+# herbivore sense: [veg_here, veg_gx, veg_gy, hunger, pred_gx, pred_gy] -> move [vx, vy]
+# the last two are the predator-danger gradient, so flight can evolve.
+IN_DIM, OUT_DIM = 6, 2
+IN_PRED = 4              # predator sense: [prey_here, prey_gx, prey_gy, hunger]
 
 
 class World:
@@ -151,9 +164,16 @@ class World:
         # --- third trophic level: predators hunting herbivores ------------------
         self._pred_chemo = []
         self._pred_kills = 0
+        self._flight = []                                     # herbivore flight alignment
+        # functional-response accounting, binned by local prey count in a searching
+        # predator's cell: search-ticks and captures per bin -> the Holling curve.
+        self._fr_bins = 16
+        self._fr_binw = 100                                  # prey-density bin width (herbivores)
+        self._fr_ticks = np.zeros(self._fr_bins)             # predator-ticks per prey-density bin
+        self._fr_catch = np.zeros(self._fr_bins)             # captures per prey-density bin
         m = cfg.init_predators
         if m > 0:
-            self.pnet = NetSpec(IN_DIM, cfg.pred_hidden, OUT_DIM)
+            self.pnet = NetSpec(IN_PRED, cfg.pred_hidden, OUT_DIM)
             self.Gp = self.pnet.random(m, cfg.pred_init_scale, self.rng)
             self.hp = np.zeros((m, cfg.pred_hidden))
             # start predators where the prey are (on the herbivore founders)
@@ -162,11 +182,13 @@ class World:
             self.Ns_p = np.full(m, cfg.pred_repro_threshold * 0.6)
             self.depth_p = np.full(m, cfg.th.dV_max)
             self.gen_p = np.ones(m, dtype=int)
+            self.handle_p = np.zeros(m)                       # ticks left processing a kill
         else:
             self.pnet = None
             self.Gp = np.zeros((0, 0)); self.hp = np.zeros((0, cfg.pred_hidden))
             self.pos_p = np.zeros((0, 2)); self.Ns_p = np.zeros(0)
             self.depth_p = np.zeros(0); self.gen_p = np.zeros(0, dtype=int)
+            self.handle_p = np.zeros(0)
 
     @property
     def size(self) -> int:
@@ -185,6 +207,25 @@ class World:
         gy = grid[ix, (iy + 1) % W] - grid[ix, (iy - 1) % W]
         return here, gx, gy
 
+    def _pred_danger_gradient(self, ix, iy):
+        """Predator-density gradient at herbivore cells (from last tick's predator
+        positions). Zero when there are no predators, so the two extra inputs are
+        inert in the two-level world."""
+        W = self.cfg.W
+        if self.pnet is None or self.pos_p.shape[0] == 0:
+            z = np.zeros(ix.shape[0]); return z, z
+        g = np.zeros(W * W)
+        pix, piy = self._cells(self.pos_p)
+        np.add.at(g, pix * W + piy, 1.0)                      # predator count per cell
+        g = g.reshape(W, W)
+        if self.cfg.pred_diffuse > 0:
+            lap = (np.roll(g, 1, 0) + np.roll(g, -1, 0) +
+                   np.roll(g, 1, 1) + np.roll(g, -1, 1) - 4.0 * g)
+            g = g + self.cfg.pred_diffuse * lap
+        gx = g[(ix + 1) % W, iy] - g[(ix - 1) % W, iy]
+        gy = g[ix, (iy + 1) % W] - g[ix, (iy - 1) % W]
+        return gx, gy
+
     def step(self, t: int) -> None:
         cfg = self.cfg
         # --- level 1: producers fix universal sunlight into vegetation ----------
@@ -198,7 +239,10 @@ class World:
         here, gx, gy = self._sense(grid, ix, iy)
         cap = cfg.producers.sense_cap
         hunger = np.clip(1.0 - self.Ns / cfg.repro_threshold, 0.0, 1.0)
-        x = np.stack([here / cap, gx, gy, hunger], axis=1)
+        # predator-danger gradient (last tick's predator positions): lets flight evolve
+        pgx, pgy = self._pred_danger_gradient(ix, iy)
+        x = np.stack([here / cap, gx, gy, hunger,
+                      cfg.pred_danger * pgx, cfg.pred_danger * pgy], axis=1)
 
         out, self.h = self.net.step(self.G, self.h, x)
         move = cfg.max_step * np.tanh(out)             # (N,2)
@@ -210,6 +254,13 @@ class World:
         if good.any():
             align = (move[good] * grad[good]).sum(1) / (step_len[good] * gnorm[good])
             self._chemo.append(float(align.mean()))
+        # flight alignment: does the move go DOWN the predator gradient (away)? (fear)
+        pg = np.stack([pgx, pgy], axis=1)
+        pn = np.linalg.norm(pg, axis=1)
+        fgood = (pn > 1e-6) & (step_len > 1e-6)
+        if fgood.any():
+            fa = -(move[fgood] * pg[fgood]).sum(1) / (step_len[fgood] * pn[fgood])
+            self._flight.append(float(fa.mean()))
 
         self.pos = (self.pos + move) % cfg.W
         # aggregation: adhesive cells drift toward same-clade neighbours (the
@@ -268,13 +319,13 @@ class World:
         return self.Ns_p.shape[0]
 
     def _predators_step(self, hix, hiy):
-        """The third trophic level. Predators sense a herbivore-density field (prey
-        biomass rasterised + diffused into a climbable gradient), their evolved
-        controller chooses a move (they are faster than herbivores — a chase), and
-        they catch prey in their cell: up to catch_frac of the cell's herbivore
-        biomass, limited by predator demand, killing those herbivores and converting
-        the kill into predator structural stock. Same core (N_s, Omega, forced-error
-        reproduction). Returns the boolean mask of herbivores killed this tick."""
+        """The third trophic level, with prey HANDLING. Predators sense a
+        herbivore-density field, chase up it, and hunt — but a predator that catches a
+        prey is then BUSY handling it for handling_time ticks and cannot hunt. At high
+        prey density it is almost always handling, so its capture rate saturates: a
+        Holling Type II functional response that is not imposed but falls out of the
+        handling bottleneck (the time to process a captured packet of prey N_s). Same
+        core (N_s, Omega, forced-error reproduction). Returns the killed-herbivore mask."""
         cfg = self.cfg; W = cfg.W; N2 = W * W
         hflat = hix * W + hiy
         praw = np.zeros(N2); np.add.at(praw, hflat, self.Ns)          # prey biomass per cell
@@ -289,6 +340,9 @@ class World:
         xp = np.stack([here / cfg.prey_sense_cap, gx, gy, hunger], axis=1)
         outp, self.hp = self.pnet.step(self.Gp, self.hp, xp)
         movep = cfg.pred_max_step * np.tanh(outp)
+        # a handling predator is busy (it does not chase); freeze its move
+        busy = self.handle_p > 0.0
+        movep[busy] = 0.0
         slen = np.linalg.norm(movep, axis=1)
         grad = np.stack([gx, gy], axis=1); gn = np.linalg.norm(grad, axis=1)
         good = (gn > 1e-6) & (slen > 1e-6)
@@ -297,18 +351,45 @@ class World:
                                            (slen[good] * gn[good])).mean()))
         self.pos_p = (self.pos_p + movep) % W
         ppix, ppiy = self._cells(self.pos_p)
-        pflat = ppix * W + ppiy
         m = self.pred_size
-        demand = np.full(m, cfg.pred_max_intake)
-        hcell = np.zeros(N2); np.add.at(hcell, hflat, self.Ns)
-        pdem = np.zeros(N2); np.add.at(pdem, pflat, demand)
-        caught_cell = np.minimum(cfg.catch_frac * hcell, pdem)        # biomass taken per cell
-        pkill = np.where(hcell > 0.0, caught_cell / np.maximum(hcell, 1e-9), 0.0)
-        predated = self.rng.random(self.size) < pkill[hflat]          # which herbivores die
-        killed_cell = np.zeros(N2); np.add.at(killed_cell, hflat[predated], self.Ns[predated])
-        share = np.where(pdem[pflat] > 0.0, demand / pdem[pflat], 0.0)
-        intake_p = killed_cell[pflat] * share * cfg.catch_efficiency
-        self._pred_kills += int(predated.sum())
+
+        # --- handling-limited predation: only searching predators can catch --------
+        intake_p = np.zeros(m)
+        predated = np.zeros(self.size, dtype=bool)
+        pflat_p = ppix * W + ppiy
+        prey_by_cell: Dict[int, List[int]] = {}
+        for a in range(self.size):
+            prey_by_cell.setdefault(int(hflat[a]), []).append(a)
+        searching = np.nonzero(self.handle_p <= 0.0)[0]
+        pred_by_cell: Dict[int, List[int]] = {}
+        for p in searching:
+            pred_by_cell.setdefault(int(pflat_p[p]), []).append(int(p))
+        for c, hunters in pred_by_cell.items():
+            avail = prey_by_cell.get(c)
+            if not avail:
+                continue
+            self.rng.shuffle(hunters)
+            for p in hunters:
+                k = len(avail)
+                if k == 0:
+                    break
+                p_enc = 1.0 - np.exp(-cfg.attack_rate * k)           # encounter rises with prey count
+                if self.rng.random() < p_enc:
+                    j = avail.pop(self.rng.integers(0, k))           # catch one prey
+                    predated[j] = True
+                    intake_p[p] += self.Ns[j] * cfg.catch_efficiency
+                    self.handle_p[p] = cfg.handling_time             # now busy handling
+        self.handle_p = np.maximum(0.0, self.handle_p - cfg.dt)      # process handling
+        # functional-response accounting (population level): per-capita kill rate vs
+        # ambient prey density, sampled across the boom-bust range. It saturates at
+        # 1/handling_time because a predator that has just fed is busy handling and
+        # cannot hunt — Holling Type II, mechanistic, not imposed.
+        kills = int(predated.sum())
+        b = min(self._fr_bins - 1, self.size // self._fr_binw)
+        self._fr_ticks[b] += m
+        self._fr_catch[b] += kills
+        self._pred_kills += kills
+
         # predator energetics + Kramers death + reproduction
         move_cost = cfg.pred_move_cost * slen
         F = intake_p - cfg.pred_occupancy - move_cost - cfg.pred_homeostasis
@@ -331,7 +412,7 @@ class World:
     def _compact_pred(self, alive):
         self.Gp = self.Gp[alive]; self.hp = self.hp[alive]; self.pos_p = self.pos_p[alive]
         self.Ns_p = self.Ns_p[alive]; self.depth_p = self.depth_p[alive]
-        self.gen_p = self.gen_p[alive]
+        self.gen_p = self.gen_p[alive]; self.handle_p = self.handle_p[alive]
 
     def _reproduce_pred(self, idx):
         cfg = self.cfg
@@ -347,6 +428,7 @@ class World:
         self.Ns_p = np.concatenate([self.Ns_p, np.full(nc, cfg.pred_repro_transfer)])
         self.depth_p = np.concatenate([self.depth_p, np.full(nc, cfg.th.dV_max * 0.9)])
         self.gen_p = np.concatenate([self.gen_p, self.gen_p[idx] + 1])
+        self.handle_p = np.concatenate([self.handle_p, np.zeros(nc)])
         if self.pred_size > cfg.pred_pop_cap:
             keep = self.rng.permutation(self.pred_size)[: cfg.pred_pop_cap]
             mask = np.zeros(self.pred_size, dtype=bool); mask[keep] = True
@@ -517,8 +599,19 @@ class World:
             m["pred_pop"] = self.pred_size
             m["pred_chemo"] = pc
             m["pred_gen"] = float(self.gen_p.mean()) if self.pred_size else 0.0
+            m["flight"] = float(np.mean(self._flight[-2000:])) if self._flight else float("nan")
+            m["handling_frac"] = float((self.handle_p > 0).mean()) if self.pred_size else 0.0
         m.update(self.producers.metrics())
         return m
+
+    def functional_response(self):
+        """The realised prey-capture rate per searching predator vs local prey count,
+        accumulated over the run. A saturating curve is a Holling Type II response."""
+        rate = np.divide(self._fr_catch, self._fr_ticks,
+                         out=np.full(self._fr_bins, np.nan), where=self._fr_ticks > 0)
+        density = [(b + 0.5) * self._fr_binw for b in range(self._fr_bins)]
+        return dict(prey_density=density, capture_rate=rate.tolist(),
+                    pred_ticks=self._fr_ticks.tolist())
 
     def buffering(self) -> Dict[str, float]:
         """Cumulative starvation-death rate for bonded vs solitary cells. If pooling
@@ -547,5 +640,5 @@ def run(cfg: WorldConfig) -> WorldResult:
             ended = "extinct"; history.append(dict(t=t, pop=0, **w.producers.metrics())); break
         if t % cfg.probe_interval == 0:
             history.append(dict(t=t, **w.metrics()))
-            w._chemo.clear(); w._pred_chemo.clear()
+            w._chemo.clear(); w._pred_chemo.clear(); w._flight.clear()
     return WorldResult(history=history, final_pop=w.size, ended=ended, cfg=cfg)

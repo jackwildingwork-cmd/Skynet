@@ -117,12 +117,73 @@ def dynamics(seeds: int = 5):
     print("       starved. Boom-bust and top-predator collapse are emergent, reported as found.")
 
 
+def holling_type_II(seeds: int = 3, ticks: int = 3000):
+    print("\n=== 4. Prey handling -> a Holling Type II functional response (emergent) ===")
+    print("    A predator that catches a prey is BUSY handling it and cannot hunt, so at")
+    print("    high prey density it is mostly handling and its capture rate saturates.")
+    ft = np.zeros(16); fc = np.zeros(16)
+    for s in range(seeds):
+        w = World(WorldConfig(seed=s, ticks=ticks, producers=ProducerConfig(seed=s),
+                              init_predators=150))
+        for t in range(1, ticks + 1):
+            w.step(t)
+            if w.size == 0:
+                break
+        ft += w._fr_ticks; fc += w._fr_catch
+    rate = np.divide(fc, ft, out=np.full(16, np.nan), where=ft > 500)
+    print(f"    {'prey density':>13} {'kill rate / predator':>21}   (asymptote 1/handling = 0.25)")
+    for b in range(16):
+        if ft[b] > 2000:
+            d = (b + 0.5) * 100
+            bar = "#" * int(rate[b] / 0.26 * 34)
+            print(f"    {d:>13.0f} {rate[b]:>21.3f}   {bar}")
+    print("    -> the curve rises but DECELERATES (concave), saturating toward 1/handling —")
+    print("       Type II, not the straight line of Type I. Handling time, not a chosen")
+    print("       response shape, produces it; and it stabilises predator-prey coexistence.")
+
+
+def arms_race(seeds: int = 3, ticks: int = 4000):
+    print("\n=== 5. Predator-prey coevolution: strong hunting vs weak flight (asymmetric) ===")
+    hunt_b, hunt_e, fl_b, fl_e = [], [], [], []
+    for s in range(seeds):
+        w0 = World(WorldConfig(seed=s, ticks=10, producers=ProducerConfig(seed=s), init_predators=150))
+        for t in range(1, 60):
+            w0.step(t)
+            if w0.size == 0:
+                break
+        hb = float(np.mean(w0._pred_chemo)) if w0._pred_chemo else float("nan")
+        fb = float(np.mean(w0._flight)) if w0._flight else float("nan")
+        w = World(WorldConfig(seed=s, ticks=ticks, producers=ProducerConfig(seed=s), init_predators=150))
+        hh, ff = [], []
+        for t in range(1, ticks + 1):
+            w.step(t)
+            if w.size == 0:
+                break
+            if t % 400 == 0:
+                if w._pred_chemo:
+                    hh.append(float(np.mean(w._pred_chemo))); w._pred_chemo.clear()
+                if w._flight:
+                    ff.append(float(np.mean(w._flight))); w._flight.clear()
+        hunt_b.append(hb); fl_b.append(fb)
+        hunt_e.append(statistics.mean(hh[-3:]) if len(hh) >= 3 else float("nan"))
+        fl_e.append(statistics.mean(ff[-3:]) if len(ff) >= 3 else float("nan"))
+    import numpy as _np
+    print(f"    predator HUNTING (climb prey gradient): {_np.nanmean(hunt_b):.2f} -> {_np.nanmean(hunt_e):.2f}")
+    print(f"    prey FLIGHT (move away from predators):  {_np.nanmean(fl_b):.2f} -> {_np.nanmean(fl_e):.2f}")
+    print("    -> both sides move in the adaptive direction, but the race is ASYMMETRIC:")
+    print("       predators evolve strong hunting; prey evolve only weak flight, because the")
+    print("       Type II handling limit keeps predation a minor mortality source, so costly")
+    print("       vigilance barely pays. Reported as found, not forced into a symmetric race.")
+
+
 def main():
     print("thermoevo — Milestone 6: a third trophic level (predators)\n"
           "sunlight -> producers -> herbivores -> predators\n")
     hunting_intelligence_evolves()
     trophic_cascade()
     dynamics()
+    holling_type_II()
+    arms_race()
 
 
 if __name__ == "__main__":
